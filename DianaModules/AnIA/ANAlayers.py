@@ -10,7 +10,7 @@ from typing import Tuple
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
 from  quantlib.algorithms.qmodules.qmodules import QConv2d, QIdentity
-from Functions._FakeQuantizer import _FakeAQuantiser
+from utils._FakeQuantizer import _FakeAQuantiser
 # qbitwidth inputs: 7bits, outputs:   6b 
 # weights: in: 32bits , out: 2bits 
 # 

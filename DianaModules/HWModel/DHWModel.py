@@ -15,7 +15,7 @@ class SIMDModelClass():
         out_fmap = in_fmap*(in_fmap>0).astype(int)
         return out_fmap
 
-    def _clip(self, in_fmap, bw): # can we clip custom ? 
+    def _clip(self, in_fmap, bw):  
         max_val = 2**(bw-1)-1
         min_val = -2**(bw-1)+1
         clip_min_mask = (in_fmap<min_val).astype(int)

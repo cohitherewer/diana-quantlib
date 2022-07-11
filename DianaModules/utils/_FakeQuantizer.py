@@ -9,9 +9,8 @@ class _FakeDQuantiser(torch.autograd.Function): # symmetric quantisation
                    clip_hi: torch.Tensor,
                    step:    torch.Tensor,
                    scale:   torch.Tensor) : 
-        x = torch.clip(x, clip_lo, clip_hi )
-    
         x = x / (step * scale)
+        x = torch.clip(x, clip_lo, clip_hi )
         x = torch.floor(x)
         x = x * (step * scale)
         return x 

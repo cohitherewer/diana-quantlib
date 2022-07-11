@@ -1,13 +1,13 @@
 import torch 
 from torch import nn
-from typing import Union 
+from typing import Union , Tuple
 
 from quantlib.algorithms.qmodules.qmodules import  QIdentity
-from quantlib.algorithms.qmodules.qmodules.qlinears import QLinear 
+from quantlib.algorithms.qmodules.qmodules.qlinears import QConv2d, QLinear 
 
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
-from Functions._FakeQuantizer import _FakeDQuantiser
+from utils._FakeQuantizer import _FakeDQuantiser
 # later define hardware specific quantisation 
 
 #scale is the value you divide the flaoting value with to get the quantised range to get the original value 
@@ -41,8 +41,8 @@ class DQScaleBias(nn.Module): # ask about this one
     def __init__(self, qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType,
-                 in_channels:             torch.Tensor, 
-                 input_scale: Union[None, float]): #channels * batch_size  
+                 in_channels:             torch.Tensor): #channels * batch_size  
+        super().__init__() 
         self.qscale = DQIdentity(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec)
@@ -79,7 +79,7 @@ class DQScaleBias(nn.Module): # ask about this one
         ## Broadcasting to get weights/biases in the correct format 
         broadcasted_weights = self.qscale(self.weights).unsqueeze(1).unsqueeze(1).expand(input.size())
         broadcasted_biases = self.qidentity(self.biases).unsqueeze(1).unsqueeze(1).expand(input.size())
-     
+    
         return self.relufunc(input * broadcasted_weights+ broadcasted_biases) 
 
 
@@ -127,16 +127,46 @@ class DQFC(nn.Module):
         broadcasted_biases = self.qidentity(self.biases).expand(input.size(0),)
         return self.qlinear(broadcasted_input)  + broadcasted_biases # make sure input sizes match 
 
-class DIConvLayer(nn.Module): # default bias false 
-    def __init__(self): 
+
+class DIConvLayer(nn.Module): # default bias false , implemented without output quantizer. Implement yourself 
+    def __init__(self, qrangespec:               QRangeSpecType,
+                 qgranularityspec:         QGranularitySpecType,
+                 qhparamsinitstrategyspec: QHParamsInitStrategySpecType ,
+                 in_channels:              int,
+                 out_channels:             int,
+                 kernel_size:              Tuple[int, ...],
+                 stride:                   Tuple[int, ...] = 1,
+                 padding:                  int = 0,
+                 dilation:                 Tuple[int, ...] = 1,
+                 groups:                   int = 1,
+                 bias : bool = False ): 
         pass 
+        self.qin = DQIdentity(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec) 
+        self.qconv = QConv2d(qrangespec=qrangespec,qgranularityspec=qgranularityspec,qhparamsinitstrategyspec=qhparamsinitstrategyspec,kernel_size=kernel_size,stride=stride, padding=padding,in_channels=in_channels ,out_channels=out_channels, dilation=dilation, groups=groups, bias = bias) 
+        self.bias_enabled = bias 
+        if self.bias_enabled: 
+            self.register_parameter(name='biases', param = torch.nn.parameter.Parameter( torch.rand(out_channels) -0.5)) # think of another way to initialise the biases 
+            self.qbiasin = DQIdentity(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec) 
     def start_observing(self): 
-        pass
+        self.qin.start_observing()
+        self.qconv.start_observing() 
+        if self.bias_enabled: 
+            self.qbiasin.start_observing()
     def stop_observing(self): 
-        pass 
+        self.qin.stop_observing()
+        self.qconv.stop_observing() 
+        if self.bias_enabled: 
+            self.qbiasin.stop_observing()
+
     def forward(self, input): 
-        pass 
+        broadcasted_bias = 0 
+        if self.bias_enabled: # still need to initialize the bias correctly. Right now it's not initialized correctly 
+            broadcasted_bias = self.qbiasin(self.biases)
+        output = self.qconv(self.qin(input)) + broadcasted_bias
+        return output
+
 #In training scales are already matched no custom res_add is needed, but when doing inference scales need to be accounted for 
+
 
 
 #Abstract class which all diana specific module have to inhereit from 

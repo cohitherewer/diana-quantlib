@@ -6,14 +6,21 @@ from torchvision import transforms
 from torchvision import datasets as ds
 
 import matplotlib as plt
-model =None
+
+
+model =None #initialize your model 
 optimizer = optim.SGD(model.parameter(), lr = 0.01, momentum=0.9)
 
 def train(epochs = 1000 , batch_size = 50): 
     train_loader = ut.DataLoader(dataset=train_dataset, batch_size=batch_size) 
    
-    losses = []
+    FP_losses = []
+    q8b_losses = []
+    qHW_losses = []
+    qSc_losses = []
     train_loss = 0.0 
+    #Iteration 1 - FP Training
+    model.start_observing()
     for e in range(epochs): 
         train_loss = 0.0 
         for x,y in train_loader: # x is a 4d tensor
@@ -30,10 +37,17 @@ def train(epochs = 1000 , batch_size = 50):
         
         valid_loss = validate() 
         print(f'Epoch {e+1} \t\t Training Loss: {train_loss /60000} Validation Loss: {valid_loss/10000} ')
-        losses.append((train_loss , valid_loss))
+        FP_losses.append((train_loss , valid_loss))
+    #Iteration 2 - Fake Quantistion all to 8 bit 
+    model.stop_observing() 
+    #Iteration 3 - Input HW specific quantisation 
+
+    #Iteration 4 - map scales and train 
+
     
-    PATH = './weights.pth'
-    torch.save(model.state_dict(), PATH)
+    #PATH = './weights.pth'
+    #torch.save(model.state_dict(), PATH)
+    #torch.save(model.state_dict(), PATH)
     return losses  
 def validate () :
     valid_loss = 0.0
@@ -52,7 +66,7 @@ validation_loader = ut.DataLoader(dataset=validation_dataset, batch_size=10)
 
 criterion = nn.CrossEntropyLoss() # for softmax in the end
 
-losses = 0 
+losses = train(e = 3, batch_size=100) 
 
 #plotting
 
@@ -62,9 +76,6 @@ for i in range(len(losses)):
         plt.plot(i,y2, color='orange', label = "validation losses")
 
 
-def quantized_aware_train(model: nn.Module): 
-
-    pass 
 
 
 # Training system without quantisation hyperparameters training algorithms 
