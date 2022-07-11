@@ -1,7 +1,7 @@
 import torch 
 from torch import nn
 from typing import Union 
-import torch.nn.functional as F
+
 from quantlib.algorithms.qmodules.qmodules import  QIdentity
 from quantlib.algorithms.qmodules.qmodules.qlinears import QLinear 
 
@@ -27,7 +27,7 @@ class DQIdentity(QIdentity):
                  qgranularityspec,
                  qhparamsinitstrategyspec) 
     
-    def _register_qop(self, func): #used for autograd functions with non-standard backward gradients 
+    def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeDQuantiser.apply 
 
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -136,6 +136,8 @@ class DIConvLayer(nn.Module): # default bias false
         pass 
     def forward(self, input): 
         pass 
+#In training scales are already matched no custom res_add is needed, but when doing inference scales need to be accounted for 
+
 
 #Abstract class which all diana specific module have to inhereit from 
 class DianaModule(): 

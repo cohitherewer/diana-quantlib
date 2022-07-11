@@ -28,7 +28,7 @@ from Functions._FakeQuantizer import _FakeAQuantiser
 #output quantization
 IDENTITY_RANGE_SPEC =  {'bitwidth': 6, 'signed': True}
 IDENTITY_GRANULARITY_SPEC = 'per-array' # cannot be changed (per layer)
-IDENTITY_INITSTRAT_SPEC = 'meanstd' # could also be const or minmax 
+IDENTITY_INITSTRAT_SPEC = 'meanstd' # clipping at mean + 3* std and mean -3std could also be const or minmax 
 # Weights quantization
 CONV_RANGE_SPEC = 'ternary'
 CONV_GRANULARITY_SPEC ='per-array' # can also be 'per-outchannel_weights' 
@@ -44,10 +44,10 @@ class AQConv2D(QConv2d):
                  out_channels:             int,
                  kernel_size:              Tuple[int, ...],
                  stride:                   Tuple[int, ...] = 1,
-                 padding:                  str = 0,
+                 padding:                  int = 0,
                  dilation:                 Tuple[int, ...] = 1,
                  groups:                   int = 1,
-                 bias:                     bool = False):
+                 ):
                  super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -58,7 +58,7 @@ class AQConv2D(QConv2d):
                          padding,
                          dilation,
                          groups,
-                         bias=bias)
+                         bias=False)
     def _register_qop(self, func): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeAQuantiser.apply 
 
