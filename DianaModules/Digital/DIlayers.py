@@ -1,8 +1,11 @@
+from abc import abstractmethod
 import torch 
 from torch import nn
 from typing import Union , Tuple
+from DianaModules.utils.DianaModule import DianaModule
 
 from quantlib.algorithms.qmodules.qmodules import  QIdentity
+from quantlib.algorithms.qmodules.qmodules.qactivations import QReLU, QReLU6
 from quantlib.algorithms.qmodules.qmodules.qlinears import QConv2d, QLinear 
 
 
@@ -36,8 +39,7 @@ class DQIdentity(QIdentity):
 
 
 
-
-class DQScaleBias(nn.Module): # ask about this one 
+class DQScaleBias(nn.Module, DianaModule): # output not quantised 
     def __init__(self, qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType,
@@ -51,7 +53,7 @@ class DQScaleBias(nn.Module): # ask about this one
         self.qidentity = DQIdentity(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec) 
-        self.relufunc = nn.ReLU()
+
 
     def start_observing(self): 
         self.qscale.start_observing()
@@ -62,8 +64,21 @@ class DQScaleBias(nn.Module): # ask about this one
     def stop_observing(self):
         self.qscale.stop_observing()
         self.qidentity.stop_observing() 
-        
-       
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+        if not self.qscale._is_quantised or not self.qidentity._is_quantised :  # should only be called after stop_observing() 
+            # not quantized 
+            return 
+        if HW_Behaviour: #defaults hardware parameters ternary behaviour
+            # mapping qh parameters 
+         
+            DianaModule.redefine_qhparams(self.qscale, {'bitwidth' : 8, 'signed': True})
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth' : 8, 'signed': True}) 
+        else : 
+            DianaModule.redefine_qhparams(self.qscale, {'bitwidth':new_bitwidth , 'signed': signed})
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth':new_bitwidth , 'signed': signed})
+    def clip_scales(self):
+
+        return super().clip_scales()    
     @property 
     def qweight(self): 
         return self.qscale(self.weights)
@@ -80,12 +95,12 @@ class DQScaleBias(nn.Module): # ask about this one
         broadcasted_weights = self.qscale(self.weights).unsqueeze(1).unsqueeze(1).expand(input.size())
         broadcasted_biases = self.qidentity(self.biases).unsqueeze(1).unsqueeze(1).expand(input.size())
     
-        return self.relufunc(input * broadcasted_weights+ broadcasted_biases) 
+        return input * broadcasted_weights+ broadcasted_biases
 
 
 
 # pooling layer use regular pool and then have it go through Qidentity 
-class DQAvgPool2D(nn.Module): 
+class DQAvgPool2D(nn.Module, DianaModule): 
     def __init__(self, qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType ,kernel_size, stride=None, padding=0) : 
@@ -94,7 +109,20 @@ class DQAvgPool2D(nn.Module):
                  qgranularityspec,
                  qhparamsinitstrategyspec)
         self.avgpool = nn.AvgPool2d(kernel_size=kernel_size,stride = stride, padding=padding) # TODO: Implement the custom avgpool 
-    
+    def start_observing(self):
+        self.qidentity.start_observing()
+    def stop_observing(self):
+        self.qidentity.stop_observing()
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+        if not self.qidentity._is_quantised:  # should only be called after stop_observing() 
+            # not quantized 
+            return 
+        if HW_Behaviour: #defaults hardware parameters ternary behaviour
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth' : 8, 'signed': True}) 
+        else : 
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth':new_bitwidth , 'signed': signed})
+    def clip_scales(self):
+        return super().clip_scales()
     def forward(self, input) : 
         out = self.avgpool(input)
         out = self.qidentity(out) 
@@ -102,7 +130,7 @@ class DQAvgPool2D(nn.Module):
 
 
 
-class DQFC(nn.Module): 
+class DQFC(nn.Module, DianaModule): # output quantized #TODO do I Quantized bias ? 
     def __init__(self,qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType , in_features: int , out_features: int): 
@@ -113,22 +141,38 @@ class DQFC(nn.Module):
         self.qidentity = DQIdentity(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec) 
-        
-        pass 
+        self.qout = DQIdentity(qrangespec,
+                 qgranularityspec,
+                 qhparamsinitstrategyspec)
     def start_observing(self) : 
         self.qidentity.start_observing() 
         self.qlinear.start_observing() 
+        self.qout.start_observing()
     def stop_observing(self) :
         self.qidentity.stop_observing()  
         self.qlinear.stop_observing()
-
+        self.qout.start_observing()
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+        if not self.qlinear._is_quantised or not self.qidentity._is_quantised or not self.qout._is_identity:  # should only be called after stop_observing() 
+            # not quantized 
+            return 
+        if HW_Behaviour: #defaults hardware parameters ternary behaviour
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth' : 8, 'signed': True}) 
+            DianaModule.redefine_qhparams(self.qlinear, {'bitwidth' : 8, 'signed': True}) 
+            DianaModule.redefine_qhparams(self.qout, {'bitwidth' : 8, 'signed': True}) 
+        else : 
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth' : new_bitwidth, 'signed': signed}) 
+            DianaModule.redefine_qhparams(self.qlinear, {'bitwidth' : new_bitwidth, 'signed': signed}) 
+            DianaModule.redefine_qhparams(self.qout, {'bitwidth' : new_bitwidth, 'signed': signed}) 
+    def clip_scales(self):
+        return super().clip_scales()
     def forward(self, input : torch.Tensor): 
         broadcasted_input = input.flatten(start_dim=1) 
-        broadcasted_biases = self.qidentity(self.biases).expand(input.size(0),)
-        return self.qlinear(broadcasted_input)  + broadcasted_biases # make sure input sizes match 
+        broadcasted_biases = self.qidentity(self.biases).expand(input.size(0),)# broadcasted for batches 
+        return self.qout(self.qlinear(broadcasted_input)  + broadcasted_biases) # make sure input sizes match 
 
 
-class DIConvLayer(nn.Module): # default bias false , implemented without output quantizer. Implement yourself 
+class DIConvLayer(nn.Module): # default bias false , implemented withoutput quantizer. 
     def __init__(self, qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType ,
@@ -143,6 +187,7 @@ class DIConvLayer(nn.Module): # default bias false , implemented without output 
         pass 
         self.qin = DQIdentity(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec) 
         self.qconv = QConv2d(qrangespec=qrangespec,qgranularityspec=qgranularityspec,qhparamsinitstrategyspec=qhparamsinitstrategyspec,kernel_size=kernel_size,stride=stride, padding=padding,in_channels=in_channels ,out_channels=out_channels, dilation=dilation, groups=groups, bias = bias) 
+        self.qout = DQIdentity(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec)
         self.bias_enabled = bias 
         if self.bias_enabled: 
             self.register_parameter(name='biases', param = torch.nn.parameter.Parameter( torch.rand(out_channels) -0.5)) # think of another way to initialise the biases 
@@ -162,18 +207,10 @@ class DIConvLayer(nn.Module): # default bias false , implemented without output 
         broadcasted_bias = 0 
         if self.bias_enabled: # still need to initialize the bias correctly. Right now it's not initialized correctly 
             broadcasted_bias = self.qbiasin(self.biases)
-        output = self.qconv(self.qin(input)) + broadcasted_bias
+        output = self.qout(self.qconv(self.qin(input)) + broadcasted_bias)
         return output
 
 #In training scales are already matched no custom res_add is needed, but when doing inference scales need to be accounted for 
 
 
 
-#Abstract class which all diana specific module have to inhereit from 
-class DianaModule(): 
-    def start_observing(): #before starting training with FP 
-        pass 
-    def stop_observing(): # before starting training with fake quantised network  
-        pass 
-    def map_scales(): # before mapping scale and retraining 
-        pass 

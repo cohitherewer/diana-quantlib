@@ -11,7 +11,7 @@ def resolve_quanttensorspecs(specs : QuantTensorSpecs) :
     pass 
 #
 
-HANDLED_FUNCTIONS = {} # custom for add 
+HANDLED_FUNCTIONS = {} # custom for add / mul
 
 import functools
 def implements(torch_function):
@@ -63,14 +63,11 @@ class QuantTensor(object):
         return torch.as_tensor(data)
 
     @implements(torch.mul)
-    def mul(input, other):
+    def mul(input, other): # 32-bit output but scales are multiplied 
+        print ("CALLED MUL ")
         try:
-            if input._N == other._N:
-                specs_i = input.specs()
-                specs_o = other.specs()
-                return QuantTensor(input.tensor * other.tensor, )
-            else:
-                raise ValueError("Shape mismatch!")
+            if(issubclass(input , QuantTensor) and issubclass(other, QuantTensor)):
+                return QuantTensor(input.tensor() * other.tensor(),{'scale': str(input.scale * other.scale)} ) 
         except AttributeError:
             return torch.mul(QuantTensor.ensure_tensor(input), QuantTensor.ensure_tensor(other)) 
     @implements(torch.add)
@@ -79,6 +76,7 @@ class QuantTensor(object):
             if input._N == other._N:
                 specs_i = input.specs()
                 specs_o = other.specs()
+                #spec caluclations 
                 return QuantTensor(input.tensor + other.tensor, )
             else:
                 raise ValueError("Shape mismatch!")

@@ -8,18 +8,23 @@ from torchvision import datasets as ds
 import matplotlib as plt
 
 
-model =None #initialize your model 
-optimizer = optim.SGD(model.parameter(), lr = 0.01, momentum=0.9)
 
 def train(epochs = 1000 , batch_size = 50): 
     train_loader = ut.DataLoader(dataset=train_dataset, batch_size=batch_size) 
-   
+    
+    qrangespec =  {'bitwidth': 8 , 'signed': False} 
+    qgranularityspec = 'per-array' 
+    qhparamsinitstrategyspec  = 'meanstd'
+
+    model =None #initialize your model 
+    optimizer = optim.SGD(model.parameter(), lr = 0.01, momentum=0.9)
+
     FP_losses = []
     q8b_losses = []
     qHW_losses = []
     qSc_losses = []
     train_loss = 0.0 
-    #Iteration 1 - FP Training
+    #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
     model.start_observing()
     for e in range(epochs): 
         train_loss = 0.0 
@@ -32,24 +37,21 @@ def train(epochs = 1000 , batch_size = 50):
             optimizer.step() 
           
             train_loss += loss.item() *x.size(0) 
-          
-        
-        
-        valid_loss = validate() 
+        valid_loss = validate(model) 
         print(f'Epoch {e+1} \t\t Training Loss: {train_loss /60000} Validation Loss: {valid_loss/10000} ')
         FP_losses.append((train_loss , valid_loss))
     #Iteration 2 - Fake Quantistion all to 8 bit 
     model.stop_observing() 
-    #Iteration 3 - Input HW specific quantisation 
 
-    #Iteration 4 - map scales and train 
+    #Iteration 3 - Input HW specific quantisation, map scales 
 
-    
+    #Iteration 4 - map scales again and train 
+        
     #PATH = './weights.pth'
     #torch.save(model.state_dict(), PATH)
     #torch.save(model.state_dict(), PATH)
     return losses  
-def validate () :
+def validate (model ) :
     valid_loss = 0.0
     model.eval()     
     for x, y in validation_loader:

@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from typing import Tuple
+from DianaModules.utils.DianaModule import DianaModule
 
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
@@ -59,7 +60,7 @@ class AQConv2D(QConv2d):
                          dilation,
                          groups,
                          bias=False)
-    def _register_qop(self, func): #used for autograd functions with non-standard backward gradients 
+    def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeAQuantiser.apply 
 
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -75,7 +76,7 @@ class AQIdentity(QIdentity):
         super().__init__(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec) 
-    def _register_qop(self, func): #used for autograd functions with non-standard backward gradients 
+    def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeAQuantiser.apply 
 
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -83,7 +84,7 @@ class AQIdentity(QIdentity):
     
                          
 
-class AnIAConvLayer(nn.Module):
+class AnIAConvLayer(nn.Module, DianaModule): # output is quantized 
     def __init__(self,
                  in_channels:              int,
                  out_channels:             int,
@@ -110,11 +111,29 @@ class AnIAConvLayer(nn.Module):
     def start_observing(self): 
         self.qconv.start_observing() 
         self.qidentity.start_observing()
-         #when stopping observations scale can be checked, modified and rounder to closest power of 2 #TODO
+         #when stopping observations scale can be checked, modified and rounder to closest power of 2 #DONE with map scales   
     def stop_observing(self): #initialises the quantization hyperparameters and model becomes quantized
         self.qconv.stop_observing() 
         self.qidentity.stop_observing()
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False): #TODO take in an array of qrangespecs to individually modify the quantizers independently
+        if not self.qconv._is_quantised:  # should only be called after stop_observing() 
+            # not quantized 
+            return 
 
+        if HW_Behaviour: #defaults hardware parameters ternary behaviour
+            # mapping qh parameters 
+         
+            DianaModule.redefine_qhparams(self.qconv, 'ternary')
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth' : 6, 'signed': True}) 
+        else : 
+            DianaModule.redefine_qhparams(self.qconv, {'bitwidth':new_bitwidth , 'signed': signed})
+            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth':new_bitwidth , 'signed': signed})
+
+    def clip_scales(self):
+
+        # clip scale to the power of 2 here 
+
+         return super().clip_scales()
     def forward(self, input) : 
         return self.qidentity(self.qconv(input) ) 
   
