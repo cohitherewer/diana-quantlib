@@ -1,11 +1,12 @@
 # Implement torch tensor wrapper  that carries with it the properties of quantized tensor instead of having to get it from nn modules
-
+# TODO Implement broadcasting on operators and ensure that functions carried out are on the quant tensors themselves by reviewing torch override
 import torch 
 import sys 
 from typing import Union , Dict
 
-from _TrueQuantizer import _TrueQuantize 
+from utils._TrueQuantizer import _TrueQuantize 
 QuantTensorSpecs = Dict[str, str]  #scale : float=1 , zero_point : int=0 , bitwidth : int=8 , clip_lo:float =0, clip_hi:float =2**8-1 
+
 
 def resolve_quanttensorspecs(specs : QuantTensorSpecs) : 
     pass 
@@ -45,16 +46,16 @@ class QuantTensor(object):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        args = [a._t if hasattr(a, '_t') else a for a in args]
+        args = [a if issubclass(a, QuantTensor) else a for a in args]
         specs = tuple(a._specs  for a in args if hasattr(a, '_specs'))
-        assert len(specs) > 0
+        
 
         if func not in HANDLED_FUNCTIONS or not all(
             issubclass(t, (torch.Tensor, QuantTensor))
             for t in types
         ):
             args = [a.tensor() if hasattr(a, 'tensor') else a for a in args]
-            return QuantTensor(func(*args, **kwargs), specs=specs[0])
+            return QuantTensor(func(*args, **kwargs))# add specs later
         return HANDLED_FUNCTIONS[func](*args, **kwargs)
     @classmethod
     def ensure_tensor(data):
@@ -65,11 +66,9 @@ class QuantTensor(object):
     @implements(torch.mul)
     def mul(input, other): # 32-bit output but scales are multiplied 
         print ("CALLED MUL ")
-        try:
-            if(issubclass(input , QuantTensor) and issubclass(other, QuantTensor)):
-                return QuantTensor(input.tensor() * other.tensor(),{'scale': str(input.scale * other.scale)} ) 
-        except AttributeError:
-            return torch.mul(QuantTensor.ensure_tensor(input), QuantTensor.ensure_tensor(other)) 
+        return QuantTensor(torch.mul(input.tensor(),  other.tensor()),{'scale': str(input.scale * other.scale)} ) 
+        #except AttributeError:
+            #return torch.mul(QuantTensor.ensure_tensor(input), QuantTensor.ensure_tensor(other)) 
     @implements(torch.add)
     def add(input, other): ## assume 32-bit output 
         try:

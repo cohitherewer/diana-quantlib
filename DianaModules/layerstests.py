@@ -1,5 +1,9 @@
 import torch
-from Digital.DIlayers import DQIdentity, DQScaleBias, DQFC
+from torch import nn 
+from utils.QuantTensor import QuantTensor
+#from Digital.DIlayers import DQIdentity, DQScaleBias, DQFC
+
+
 
 # test identity 
 
@@ -25,21 +29,32 @@ from Digital.DIlayers import DQIdentity, DQScaleBias, DQFC
 #print(output)
 
 # BN  
-qrangespec =  {'bitwidth': 8 , 'signed': False} 
-qgranularityspec = 'per-array' 
-qhparamsinitstrategyspec  = 'const'
+#qrangespec =  {'bitwidth': 8 , 'signed': False} 
+#qgranularityspec = 'per-array' 
+#qhparamsinitstrategyspec  = 'const'
 
-test_bn = DQScaleBias(qrangespec=qrangespec, qgranularityspec=qgranularityspec ,qhparamsinitstrategyspec=qhparamsinitstrategyspec, in_channels=3 ) 
-test_tensor = torch.rand(6 , 3, 28, 28 )
-test_bn.start_observing()
-for i in range(20): 
-    test_tensor = torch.rand(6 , 3, 28, 28 )
-    test_bn(test_tensor) 
-test_bn.stop_observing() 
+#test_bn = DQScaleBias(qrangespec=qrangespec, qgranularityspec=qgranularityspec ,qhparamsinitstrategyspec=qhparamsinitstrategyspec, in_channels=3 ) 
+#test_tensor = torch.rand(6 , 3, 28, 28 )
+#test_bn.start_observing()
+#for i in range(20): 
+    #test_tensor = torch.rand(6 , 3, 28, 28 )
+    #test_bn(test_tensor) 
+#test_bn.stop_observing() 
 
-test_tensor = torch.rand(1,3,2,2) 
-output = test_bn(test_tensor)
+#test_tensor = torch.rand(1,3,2,2) 
+#output = test_bn(test_tensor)
 
-print(test_bn.parameters() )
+
 
  # test quanttensor matmul 
+
+
+
+# testing quant tensor operations 
+
+x = QuantTensor(torch.rand( 3 ,1 )) 
+y = QuantTensor(torch.rand(3, 1))
+print (type(x) , type(y) ) 
+print(torch.mul(x , y) )
+#print("##################")
+#print (torch.matmul(x, y))

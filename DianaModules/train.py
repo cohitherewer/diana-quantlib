@@ -1,81 +1,104 @@
+from math import gamma
+from sched import scheduler
+from pyparsing import Combine
+from sqlalchemy import null
 import torch
 from torch import nn
 import torch.utils.data as ut
 from torch import nn , optim
 from torchvision import transforms
 from torchvision import datasets as ds
-
+from typing import Dict, Union 
+from math import floor
 import matplotlib as plt
 
+from DianaModules.Models.QResnet20 import QResnet20
 
 
-def train(epochs = 1000 , batch_size = 50): 
-    train_loader = ut.DataLoader(dataset=train_dataset, batch_size=batch_size) 
+
+def quantization_aware_train(model , optimizer,train_dataset: ds, validation_dataset: ds , criterion = nn.CrossEntropyLoss() , schedueler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
+    #train_loader = ut.DataLoader(dataset=train_dataset, batch_size=batch_size) 
     
-    qrangespec =  {'bitwidth': 8 , 'signed': False} 
+    qrangespec =  {'bitwidth': 8 , 'signed': True} 
     qgranularityspec = 'per-array' 
     qhparamsinitstrategyspec  = 'meanstd'
-
-    model =None #initialize your model 
-    optimizer = optim.SGD(model.parameter(), lr = 0.01, momentum=0.9)
-
-    FP_losses = []
-    q8b_losses = []
-    qHW_losses = []
-    qSc_losses = []
-    train_loss = 0.0 
+    data_loader = {'train': ut.DataLoader(train_dataset, batch_size=batch_size) , 'validate' : ut.DataLoader(validation_dataset, batch_size=floor(batch_size/len(train_dataset) * len(validation_dataset)))}
+    
+ 
     #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
     model.start_observing()
-    for e in range(epochs): 
-        train_loss = 0.0 
-        for x,y in train_loader: # x is a 4d tensor
-            optimizer.zero_grad() 
-            yhat = model(x)
-            
-            loss = criterion(yhat, y) 
-            loss.backward() 
-            optimizer.step() 
-          
-            train_loss += loss.item() *x.size(0) 
-        valid_loss = validate(model) 
-        print(f'Epoch {e+1} \t\t Training Loss: {train_loss /60000} Validation Loss: {valid_loss/10000} ')
-        FP_losses.append((train_loss , valid_loss))
+    FP_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
     #Iteration 2 - Fake Quantistion all to 8 bit 
     model.stop_observing() 
-
+    q8b_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
     #Iteration 3 - Input HW specific quantisation, map scales 
-
+    model.map_scales(HW_behaviour=True) 
+    qHW_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
     #Iteration 4 - map scales again and train 
-        
+    model.clip_scales() 
+    qSc_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
     #PATH = './weights.pth'
     #torch.save(model.state_dict(), PATH)
     #torch.save(model.state_dict(), PATH)
-    return losses  
-def validate (model ) :
-    valid_loss = 0.0
-    model.eval()     
-    for x, y in validation_loader:
-        target = model(x)
-        loss = criterion(target,y)
-        valid_loss = loss.item() * x.size(0)
-    return valid_loss
 
-train_dataset = ds.FashionMNIST(root="./data" , train = True, download = True, transform=transforms.ToTensor())
-validation_dataset = ds.FashionMNIST(root="./data" , train = True, download = False , transform=transforms.ToTensor())
+def train(model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None): 
+     metrics = {}
+     
+     assert (model and optimizer) 
+     for e in range(epochs):     
+        for stage in ['train', 'validate']: 
+            running_loss = 0 
+            running_correct = 0 
+            if stage == 'train': 
+                model.train() 
+            else : 
+                model.eval () 
+            
+            for x,y in data_loader[stage]: # x is a 4d tensor
+                optimizer.zero_grad() 
+                if stage == 'validate': 
+                    with torch.no_grad(): 
+                        yhat = model(x)
+                else: 
+                    yhat = model(x) 
+                loss = criterion(yhat, y) 
+                predictions = torch.argmax(yhat)
+                if stage == 'train': 
+                    loss.backward() 
+                    optimizer.step() 
+          
+                running_loss += loss.item() *x.size(0) 
+                running_correct += torch.sum(predictions==y.data).item() # for classification problems
+            e_loss = running_loss / len(data_loader[stage].dataset)
+            e_acc = running_correct / len(data_loader[stage].dataset)
+            print(f'Epoch {e+1} \t\t {stage}ing... Loss: {e_loss} Accuracy :{e_acc}')
+        if stage == 'train' and scheduler is not None: 
+            scheduler.step()
+        metrics[stage]['loss'].append(e_loss)
+        metrics[stage]['acc'].append(e_acc)
+     return metrics  
+
+def plot_metrics(metrics) : 
+    fig, (plot1, plot2) = plt.subplots(nrows=1, ncols=2)
+    plot1.plot(metrics['train']['loss'], label='train loss')
+    plot1.plot(metrics['validate']['loss'], label='val loss')
+    lines, labels = plot1.get_legend_handles_labels()
+    plot1.legend(lines, labels, loc='best')
+
+    plot2.plot(metrics['train']['acc'], label='train acc')
+    plot2.plot(metrics['validate']['acc'], label='val acc')
+    plot2.legend()
+    pass 
+
+
+train_dataset = ds.FashionMNIST(root="./data/FashionMNIST/train" , train = True, download = True, transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
+validation_dataset = ds.FashionMNIST(root="./data/FashionMNIST/valid" , train = False, download = True , transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
 
 
 validation_loader = ut.DataLoader(dataset=validation_dataset, batch_size=10) 
 
-criterion = nn.CrossEntropyLoss() # for softmax in the end
 
-losses = train(e = 3, batch_size=100) 
 
-#plotting
-
-for i in range(len(losses)): 
-    for y1, y2 in losses[i]:
-        plt.plot(i,y1 , color='red', label="train losses") 
-        plt.plot(i,y2, color='orange', label = "validation losses")
 
 
 
