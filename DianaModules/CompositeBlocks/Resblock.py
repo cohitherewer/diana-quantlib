@@ -8,7 +8,7 @@ from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHPa
 from Digital.DIlayers import DQScaleBias
 from AnIA.ANAlayers import AQConv2D
 
-class QResblock(nn.Module , DianaModule):# conv bn covn bn + res_add
+class QResblock(DianaModule):# conv bn covn bn + res_add
     def __init__(self , qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType,

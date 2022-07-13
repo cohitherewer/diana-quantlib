@@ -1,7 +1,5 @@
 import torch
 
-
-
 class _FakeDQuantiser(torch.autograd.Function): # symmetric quantisation 
     
     def forward(ctx,  x:   torch.Tensor,
@@ -9,9 +7,13 @@ class _FakeDQuantiser(torch.autograd.Function): # symmetric quantisation
                    clip_hi: torch.Tensor,
                    step:    torch.Tensor,
                    scale:   torch.Tensor) : 
-        x = x / (step * scale)
-        x = torch.clip(x, clip_lo, clip_hi )
+   
+        
+        
+        x = x / (step * scale) # quantized 
+        x = torch.clip(x, clip_lo, clip_hi ) # clipping to bw
         x = torch.floor(x)
+        
         x = x * (step * scale)
         return x 
 

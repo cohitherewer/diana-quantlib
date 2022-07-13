@@ -85,7 +85,7 @@ class AQIdentity(QIdentity , DianaBaseOperation):
         else : 
             self.redefine_qhparams( {'bitwidth':new_bitwidth , 'signed': signed})
                          
-class AnIAConvLayer(nn.Module, DianaModule): # output is quantized 
+class AnIAConvLayer(DianaModule): # output is quantized 
     def __init__(self,
                  in_channels:              int,
                  out_channels:             int,
