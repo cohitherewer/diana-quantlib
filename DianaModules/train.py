@@ -16,7 +16,7 @@ from DianaModules.Models.QResnet20 import QResnet20
 
 
 
-def quantization_aware_train(model , optimizer,train_dataset: ds, validation_dataset: ds , criterion = nn.CrossEntropyLoss() , schedueler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
+def quantization_aware_train(model , optimizer,train_dataset: ds, validation_dataset: ds , criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
     #train_loader = ut.DataLoader(dataset=train_dataset, batch_size=batch_size) 
     
     qrangespec =  {'bitwidth': 8 , 'signed': True} 
@@ -28,18 +28,20 @@ def quantization_aware_train(model , optimizer,train_dataset: ds, validation_dat
     #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
     model.start_observing()
     FP_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
+    plot_metrics(FP_metrics) 
     #Iteration 2 - Fake Quantistion all to 8 bit 
     model.stop_observing() 
     q8b_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
+    plot_metrics(q8b_metrics ) 
     #Iteration 3 - Input HW specific quantisation, map scales 
     model.map_scales(HW_behaviour=True) 
     qHW_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
-    #Iteration 4 - map scales again and train 
+    plot_metrics(qHW_metrics) 
+    #Iteration 4 - clip scales to the power of 2 again and train 
     model.clip_scales() 
     qSc_metrics =  train(model, optimizer,data_loader, epochs, criterion, scheduler )
-    #PATH = './weights.pth'
-    #torch.save(model.state_dict(), PATH)
-    #torch.save(model.state_dict(), PATH)
+    plot_metrics(qSc_metrics ) 
+
 
 def train(model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None): 
      metrics = {}
@@ -54,7 +56,7 @@ def train(model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ],
             else : 
                 model.eval () 
             
-            for x,y in data_loader[stage]: # x is a 4d tensor
+            for x,y in data_loader[stage]: 
                 optimizer.zero_grad() 
                 if stage == 'validate': 
                     with torch.no_grad(): 
@@ -78,7 +80,7 @@ def train(model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ],
         metrics[stage]['acc'].append(e_acc)
      return metrics  
 
-def plot_metrics(metrics) : 
+def plot_metrics(metrics : Dict [str , Dict[str, list]]) : 
     fig, (plot1, plot2) = plt.subplots(nrows=1, ncols=2)
     plot1.plot(metrics['train']['loss'], label='train loss')
     plot1.plot(metrics['validate']['loss'], label='val loss')
@@ -93,10 +95,6 @@ def plot_metrics(metrics) :
 
 train_dataset = ds.FashionMNIST(root="./data/FashionMNIST/train" , train = True, download = True, transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
 validation_dataset = ds.FashionMNIST(root="./data/FashionMNIST/valid" , train = False, download = True , transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
-
-
-validation_loader = ut.DataLoader(dataset=validation_dataset, batch_size=10) 
-
 
 
 

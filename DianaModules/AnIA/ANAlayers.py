@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from typing import Tuple
-from DianaModules.utils.DianaModule import DianaModule
+from DianaModules.utils.DianaModule import DianaModule, DianaBaseOperation
 
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
@@ -17,13 +17,6 @@ from utils._FakeQuantizer import _FakeAQuantiser
 # 
 # no bias 
 # quantisation: optional between per-layer (per-output array) or per array , in images per channel could be useful 
-
-
-#Modeled by a QConv + 
-
-
-
-
 
 # HARDWARE SPECS 
 #output quantization
@@ -36,7 +29,7 @@ CONV_GRANULARITY_SPEC ='per-array' # can also be 'per-outchannel_weights'
 CONV_INITSTRAT_SPEC = 'meanstd'
 
 
-class AQConv2D(QConv2d): 
+class AQConv2D(QConv2d, DianaBaseOperation): 
     def __init__(self,
                  qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
@@ -65,9 +58,14 @@ class AQConv2D(QConv2d):
 
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale)  
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+        if HW_Behaviour: #defaults hardware parameters ternary behaviour
+            # mapping qh parameters 
+            self.redefine_qhparams( 'ternary')
+        else: 
+            self.redefine_qhparams( {'bitwidth':new_bitwidth , 'signed': signed})
 
-
-class AQIdentity(QIdentity): 
+class AQIdentity(QIdentity , DianaBaseOperation): 
     def __init__(self,
                  qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
@@ -81,9 +79,12 @@ class AQIdentity(QIdentity):
 
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale)           
-    
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+        if HW_Behaviour: #defaults hardware parameters ternary behaviour
+            self.redefine_qhparams({'bitwidth' : 6, 'signed': True}) 
+        else : 
+            self.redefine_qhparams( {'bitwidth':new_bitwidth , 'signed': signed})
                          
-
 class AnIAConvLayer(nn.Module, DianaModule): # output is quantized 
     def __init__(self,
                  in_channels:              int,
@@ -107,7 +108,7 @@ class AnIAConvLayer(nn.Module, DianaModule): # output is quantized
                           qgranularityspec=CONV_GRANULARITY_SPEC,
                           qhparamsinitstrategyspec=CONV_INITSTRAT_SPEC) 
         self.qidentity = AQIdentity(IDENTITY_RANGE_SPEC, IDENTITY_GRANULARITY_SPEC, IDENTITY_INITSTRAT_SPEC)
-
+        
     def start_observing(self): 
         self.qconv.start_observing() 
         self.qidentity.start_observing()
@@ -115,25 +116,6 @@ class AnIAConvLayer(nn.Module, DianaModule): # output is quantized
     def stop_observing(self): #initialises the quantization hyperparameters and model becomes quantized
         self.qconv.stop_observing() 
         self.qidentity.stop_observing()
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False): #TODO take in an array of qrangespecs to individually modify the quantizers independently
-        if not self.qconv._is_quantised:  # should only be called after stop_observing() 
-            # not quantized 
-            return 
-
-        if HW_Behaviour: #defaults hardware parameters ternary behaviour
-            # mapping qh parameters 
-         
-            DianaModule.redefine_qhparams(self.qconv, 'ternary')
-            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth' : 6, 'signed': True}) 
-        else : 
-            DianaModule.redefine_qhparams(self.qconv, {'bitwidth':new_bitwidth , 'signed': signed})
-            DianaModule.redefine_qhparams(self.qidentity, {'bitwidth':new_bitwidth , 'signed': signed})
-
-    def clip_scales(self):
-
-        # clip scale to the power of 2 here 
-
-         return super().clip_scales()
     def forward(self, input) : 
         return self.qidentity(self.qconv(input) ) 
   
