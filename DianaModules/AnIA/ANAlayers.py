@@ -11,7 +11,7 @@ from DianaModules.utils.DianaModule import DianaModule, DianaBaseOperation
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
 from  quantlib.algorithms.qmodules.qmodules import QConv2d, QIdentity
-from utils._FakeQuantizer import _FakeAQuantiser
+from DianaModules.utils._FakeQuantizer import _FakeAQuantiser
 # qbitwidth inputs: 7bits, outputs:   6b 
 # weights: in: 32bits , out: 2bits 
 # 
@@ -84,9 +84,12 @@ class AQIdentity(QIdentity , DianaBaseOperation):
             self.redefine_qhparams({'bitwidth' : 6, 'signed': True}) 
         else : 
             self.redefine_qhparams( {'bitwidth':new_bitwidth , 'signed': signed})
-                         
-class AnIAConvLayer(DianaModule): # output is quantized 
+
+class DIANAConv2d(DianaModule): # output is quantized 
     def __init__(self,
+                    qrangespec:               QRangeSpecType,
+                 qgranularityspec:         QGranularitySpecType,
+                 qhparamsinitstrategyspec: QHParamsInitStrategySpecType ,
                  in_channels:              int,
                  out_channels:             int,
                  kernel_size:              Tuple[int, ...],
@@ -94,9 +97,10 @@ class AnIAConvLayer(DianaModule): # output is quantized
                  padding:                  str = 0,
                  dilation:                 Tuple[int, ...] = 1,
                  groups:                   int = 1,
-
+         
                  
                  ): 
+        super().__init__()        
         self.qconv = AQConv2D(in_channels=in_channels,
                                        out_channels=out_channels,
                                        kernel_size=kernel_size,
@@ -104,10 +108,10 @@ class AnIAConvLayer(DianaModule): # output is quantized
                                        padding=padding,
                                        dilation=dilation,
                                        groups=groups,
-                                       bias=False, qrangespec=CONV_RANGE_SPEC,
-                          qgranularityspec=CONV_GRANULARITY_SPEC,
-                          qhparamsinitstrategyspec=CONV_INITSTRAT_SPEC) 
-        self.qidentity = AQIdentity(IDENTITY_RANGE_SPEC, IDENTITY_GRANULARITY_SPEC, IDENTITY_INITSTRAT_SPEC)
+                                        qrangespec=qrangespec,
+                          qgranularityspec=qgranularityspec,
+                          qhparamsinitstrategyspec=qhparamsinitstrategyspec) 
+        self.qidentity = AQIdentity(qrangespec, qgranularityspec, qhparamsinitstrategyspec)
         
     def start_observing(self): 
         self.qconv.start_observing() 
@@ -116,6 +120,11 @@ class AnIAConvLayer(DianaModule): # output is quantized
     def stop_observing(self): #initialises the quantization hyperparameters and model becomes quantized
         self.qconv.stop_observing() 
         self.qidentity.stop_observing()
+    @classmethod
+    def from_fp_module(cls, conv_layer : nn.Conv2d, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
+     
+        return DIANAConv2d(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels= conv_layer.in_channels, out_channels=conv_layer.out_channels, kernel_size=conv_layer.kernel_size, stride=conv_layer.stride, padding=conv_layer.padding, dilation=conv_layer.dilation,groups=conv_layer.groups)
+    
     def forward(self, input) : 
         return self.qidentity(self.qconv(input) ) 
   

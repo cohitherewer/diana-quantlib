@@ -1,6 +1,8 @@
 import torch
-from torch import nn 
-from utils.QuantTensor import QuantTensor
+from torch import nn
+from DianaModules.utils.DianaModule import DianaModule
+from quantlib.editing.editing.tests import ILSVRC12 
+
 #from Digital.DIlayers import DQIdentity, DQScaleBias, DQFC
 
 
@@ -52,9 +54,15 @@ from utils.QuantTensor import QuantTensor
 
 # testing quant tensor operations 
 
-x = QuantTensor(torch.rand( 3 ,1 )) 
-y = QuantTensor(torch.rand(3, 1))
-print (type(x) , type(y) ) 
-print(torch.mul(x , y) )
+#x = QuantTensor(torch.rand( 3 ,1 )) 
+#y = QuantTensor(torch.rand(3, 1))
+#print (type(x) , type(y) ) 
+#print(torch.mul(x , y) )
 #print("##################")
 #print (torch.matmul(x, y))
+ 
+ # Testing creation of fake quantized models of diana module from FP models 
+rn18 = ILSVRC12.ResNet.ResNet('ResNet18')
+
+converted_graph = DianaModule.fquantize_model8bit(rn18) 
+print(converted_graph)

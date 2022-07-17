@@ -4,7 +4,7 @@ import torch
 import sys 
 from typing import Union , Dict
 
-from utils._TrueQuantizer import _TrueQuantize 
+from ._TrueQuantizer import _TrueQuantize 
 QuantTensorSpecs = Dict[str, str]  #scale : float=1 , zero_point : int=0 , bitwidth : int=8 , clip_lo:float =0, clip_hi:float =2**8-1 
 
 

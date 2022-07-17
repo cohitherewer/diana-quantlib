@@ -1,17 +1,19 @@
 from ast import Param
+import dataclasses
 
 import math 
-from attr import dataclass
 import numpy as np 
 import torch
-from Digital.DIlayers import DQScaleBias, DQIdentity
-from HWModel.DHWModel import SIMDModel
+
+
+from  Digital.DIlayers import DIANABatchNorm, DIANAIdentity
+from HWModel.HWModel import SIMDModel
 from typing  import Union
 
 
 #TODO ASK ABOUT NEGATIVE BOUND IN DHWMODEL 
 
-@dataclass
+@dataclasses
 class ParamLayer: 
     bn_w : Union[np.ndarray , None] =None#quantized batchnorm weights
     bn_ws : Union[np.ndarray , int] =1 #batchnorm weight scale 
@@ -27,9 +29,9 @@ class SIMDValidation(unittest.TestCase):
         qrangespec = {'bitwidth': 7 , 'signed': True}
         qgranularityspec= 'per-array'
         qhparaminit =  'const'
-        self.diana_bn = DQScaleBias(qrangespec , qgranularityspec, qhparaminit, in_channels=1 )  
-        self.qres = DQIdentity(qrangespec , qgranularityspec, qhparaminit)
-        self.qout= DQIdentity(qrangespec , qgranularityspec, qhparaminit)
+        self.diana_bn = DIANABatchNorm(qrangespec , qgranularityspec, qhparaminit, in_channels=1 )  
+        self.qres = DIANAIdentity(qrangespec , qgranularityspec, qhparaminit)
+        self.qout= DIANAIdentity(qrangespec , qgranularityspec, qhparaminit)
 
         self.diana_bn.stop_observing() # _is_quantised on scales set  
         self.qres.stop_observing() 
@@ -57,7 +59,7 @@ class SIMDValidation(unittest.TestCase):
         layer = ParamLayer(bn_w = bn_w,bn_b=bn_b, bn_ws=bn_ws, bn_bs=bn_bs )
 
         hw_out = SIMDModel._bn( layer, input.detach().numpy())  
-
+   
         self.assertTrue(np.allclose(d_out.detach().numpy()[0], hw_out[0], rtol=1e-05, atol=1e-08))
          
     def test_quant(self):
@@ -83,6 +85,7 @@ class SIMDValidation(unittest.TestCase):
         layer = ParamLayer(bn_w = bn_w,bn_b=bn_b, bn_ws=bn_ws, bn_bs=bn_bs ,r_s=r_s , q_s =q_s  )
         hw_out = SIMDModel.fp(layer, in_fmap0= input1, in_fmap1=fmap2, ds=True)
         d_out = self.qout(self.diana_bn(input1) + self.qres(input2))  / (self.qout.scale *self.qout.step)
+        
         self.assertTrue(np.allclose(d_out.detach().numpy()[0], hw_out[0], rtol=1e-05, atol=1e-08))
         pass 
 

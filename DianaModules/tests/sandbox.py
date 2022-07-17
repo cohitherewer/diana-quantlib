@@ -1,6 +1,7 @@
 import torch 
 from torch import nn
- 
+
+from  DianaModules.utils.QuantTensor import QuantTensor
 
 test = nn.Sequential(nn.Linear(3,3 ), nn.Linear(3, 1 )) 
 for idx ,m in enumerate(test.modules()): 
