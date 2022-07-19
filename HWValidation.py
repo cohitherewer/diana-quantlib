@@ -1,19 +1,20 @@
 from ast import Param
-import dataclasses
 
-import math 
+
+import math
+from attr import dataclass 
 import numpy as np 
 import torch
 
 
-from  Digital.DIlayers import DIANABatchNorm, DIANAIdentity
-from HWModel.HWModel import SIMDModel
+from    DianaModules.Digital.DIlayers import DQScaleBias, DIANAIdentity
+from DianaModules.HWModel.HWModel import SIMDModel
 from typing  import Union
 
 
 #TODO ASK ABOUT NEGATIVE BOUND IN DHWMODEL 
 
-@dataclasses
+@dataclass
 class ParamLayer: 
     bn_w : Union[np.ndarray , None] =None#quantized batchnorm weights
     bn_ws : Union[np.ndarray , int] =1 #batchnorm weight scale 
@@ -29,7 +30,7 @@ class SIMDValidation(unittest.TestCase):
         qrangespec = {'bitwidth': 7 , 'signed': True}
         qgranularityspec= 'per-array'
         qhparaminit =  'const'
-        self.diana_bn = DIANABatchNorm(qrangespec , qgranularityspec, qhparaminit, in_channels=1 )  
+        self.diana_bn = DQScaleBias(qrangespec , qgranularityspec, qhparaminit, in_channels=1 )  
         self.qres = DIANAIdentity(qrangespec , qgranularityspec, qhparaminit)
         self.qout= DIANAIdentity(qrangespec , qgranularityspec, qhparaminit)
 
@@ -39,7 +40,7 @@ class SIMDValidation(unittest.TestCase):
         self.qres.scale = torch.tensor(2**math.floor(math.log2(self.qres.scale))) 
         self.qout.scale = torch.tensor(2**math.floor(math.log2(self.qres.scale))) 
         self.diana_bn.clip_scales() # clip to power of 2 
-    def test_bn(self) : 
+    def test_bn(self) : # test needs to be edited because of output of dqscale bias was edited
         
         
         

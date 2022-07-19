@@ -1,8 +1,10 @@
+from lib2to3.pytree import convert
 import torch
 from torch import nn
-from DianaModules.utils.DianaModule import DianaModule
-from quantlib.editing.editing.tests import ILSVRC12 
-
+import DianaModules.Digital.DIlayers as di
+import DianaModules.utils.BaseModules as bm 
+from quantlib.editing.editing.tests import ILSVRC12, common 
+import quantlib.editing.graphs as qg
 #from Digital.DIlayers import DQIdentity, DQScaleBias, DQFC
 
 
@@ -63,6 +65,11 @@ from quantlib.editing.editing.tests import ILSVRC12
  
  # Testing creation of fake quantized models of diana module from FP models 
 rn18 = ILSVRC12.ResNet.ResNet('ResNet18')
+test_modules = nn.Sequential(nn.Conv2d(6 , 4 , 3, bias=True), nn.Conv2d(4, 7, 3, bias=True), nn.BatchNorm2d(7))
+converted_graph = bm.DianaModule.fquantize_model8bit(rn18) 
+#print(converted_graph)
+for _ , module in enumerate(converted_graph.modules()): 
+    print (_ , module)
+        
+#converted_graph.stop_observing()
 
-converted_graph = DianaModule.fquantize_model8bit(rn18) 
-print(converted_graph)

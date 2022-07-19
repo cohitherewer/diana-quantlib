@@ -3,10 +3,10 @@ import torch
 from torch import nn 
 from typing import Tuple
 from DianaModules.Digital.DIlayers import DIANAIdentity
-from DianaModules.utils.DianaModule import DianaModule
+from DianaModules.utils.BaseModules import DianaModule
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
 from Digital.DIlayers import DIANABatchNorm
-from AnIA.ANAlayers import AQConv2D
+from AnIA.ANAlayers import DIANAConv2d
 
 class QResblock(DianaModule):# conv bn covn bn + res_add
     def __init__(self , qrangespec:               QRangeSpecType,
@@ -21,14 +21,14 @@ class QResblock(DianaModule):# conv bn covn bn + res_add
                  groups:                   int = 1,
                  ) : 
         if downsampling_stride > 1 : 
-            self.conv1 = AQConv2D(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, stride=downsampling_stride, padding=padding, dilation=dilation, groups=groups)
-            self.shortcut = nn.Sequential(AQConv2D(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec,kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels,stride = downsampling_stride, padding=padding),DIANABatchNorm(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, in_channels=out_channels) )
+            self.conv1 = DIANAConv2d(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, stride=downsampling_stride, padding=padding, dilation=dilation, groups=groups)
+            self.shortcut = nn.Sequential(DIANAConv2d(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec,kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels,stride = downsampling_stride, padding=padding),DIANABatchNorm(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, in_channels=out_channels) )
         else: 
-            self.conv1 = AQConv2D(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, stride=1, padding=padding, dilation=dilation, groups=groups)
+            self.conv1 = DIANAConv2d(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, kernel_size=kernel_size, in_channels=in_channels, out_channels=out_channels, stride=1, padding=padding, dilation=dilation, groups=groups)
             self.shortcut = nn.Sequential()    
         self.bn1 = nn.Sequential(DIANABatchNorm(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, in_channels=out_channels)  , nn.ReLU())
         self.qid1 = DIANAIdentity(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec) # quantizing output of bn1 to 7bit 
-        self.conv2 = AQConv2D(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, kernel_size=kernel_size, in_channels=out_channels, out_channels=out_channels, stride=1, padding=padding, dilation=dilation, groups=groups) 
+        self.conv2 = DIANAConv2d(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, kernel_size=kernel_size, in_channels=out_channels, out_channels=out_channels, stride=1, padding=padding, dilation=dilation, groups=groups) 
         self.bn2 = DIANABatchNorm(qrangespec=qrangespec, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec, in_channels=out_channels) 
 
 

@@ -1,7 +1,7 @@
 import torch 
 from torch import nn 
 from CompositeBlocks.Resblock import QResblock
-from DianaModules.utils.DianaModule import DianaModule
+from DianaModules.utils.BaseModules import DianaModule
 from quantlib.algorithms.qbase import QRangeSpecType , QGranularitySpecType, QHParamsInitStrategySpecType
 
 

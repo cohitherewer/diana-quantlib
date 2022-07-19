@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from typing import Tuple
-from DianaModules.utils.DianaModule import DianaModule, DianaBaseOperation
+from DianaModules.utils.BaseModules import DianaModule, DianaBaseOperation
 
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
@@ -19,8 +19,8 @@ from DianaModules.utils._FakeQuantizer import _FakeAQuantiser
 # quantisation: optional between per-layer (per-output array) or per array , in images per channel could be useful 
 
 # HARDWARE SPECS 
-#output quantization
-IDENTITY_RANGE_SPEC =  {'bitwidth': 6, 'signed': True}
+#input quantization
+IDENTITY_RANGE_SPEC =  {'bitwidth': 7, 'signed': True}
 IDENTITY_GRANULARITY_SPEC = 'per-array' # cannot be changed (per layer)
 IDENTITY_INITSTRAT_SPEC = 'meanstd' # clipping at mean + 3* std and mean -3std could also be const or minmax 
 # Weights quantization
@@ -29,7 +29,7 @@ CONV_GRANULARITY_SPEC ='per-array' # can also be 'per-outchannel_weights'
 CONV_INITSTRAT_SPEC = 'meanstd'
 
 
-class AQConv2D(QConv2d, DianaBaseOperation): 
+class DIANAConv2d(QConv2d, DianaBaseOperation): 
     def __init__(self,
                  qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
@@ -81,11 +81,11 @@ class AQIdentity(QIdentity , DianaBaseOperation):
         return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale)           
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: #defaults hardware parameters ternary behaviour
-            self.redefine_qhparams({'bitwidth' : 6, 'signed': True}) 
+            self.redefine_qhparams({'bitwidth' : 7, 'signed': True}) 
         else : 
             self.redefine_qhparams( {'bitwidth':new_bitwidth , 'signed': signed})
 
-class DIANAConv2d(DianaModule): # output is quantized 
+class DIANAConv2d(DianaModule): # input is quantized  output isin't
     def __init__(self,
                     qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
@@ -101,7 +101,7 @@ class DIANAConv2d(DianaModule): # output is quantized
                  
                  ): 
         super().__init__()        
-        self.qconv = AQConv2D(in_channels=in_channels,
+        self.qconv = DIANAConv2d(in_channels=in_channels,
                                        out_channels=out_channels,
                                        kernel_size=kernel_size,
                                        stride=stride,
@@ -126,6 +126,6 @@ class DIANAConv2d(DianaModule): # output is quantized
         return DIANAConv2d(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels= conv_layer.in_channels, out_channels=conv_layer.out_channels, kernel_size=conv_layer.kernel_size, stride=conv_layer.stride, padding=conv_layer.padding, dilation=conv_layer.dilation,groups=conv_layer.groups)
     
     def forward(self, input) : 
-        return self.qidentity(self.qconv(input) ) 
+        return self.qconv(self.qidentity(input) ) 
   
 
