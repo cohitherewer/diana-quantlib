@@ -93,8 +93,8 @@ def plot_metrics(metrics : Dict [str , Dict[str, list]]) :
     pass 
 
 
-train_dataset = ds.FashionMNIST(root="./data/FashionMNIST/train" , train = True, download = True, transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
-validation_dataset = ds.FashionMNIST(root="./data/FashionMNIST/valid" , train = False, download = True , transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
+train_dataset = ds.MNIST(root="./data/MNIST/train" , train = True, download = True, transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
+validation_dataset = ds.MNIST(root="./data/MNIST/valid" , train = False, download = True , transform=transforms.Compose(transforms.ToTensor(), transforms.Normalize(0.5,)))
 
 
 

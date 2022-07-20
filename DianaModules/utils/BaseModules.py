@@ -5,6 +5,7 @@ from turtle import forward
 from typing import Any, Dict, Union
 
 from DianaModules.core.operations import DianaBaseOperation
+from quantlib.editing.editing.editors.retracers import QuantLibRetracer
 from .Editing import DianaF2FConverter, DianaF2TConverter
 from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qmodules import _PACTModule
 
@@ -17,7 +18,7 @@ import torch
 import torch.fx as fx
 from torch import nn
 import quantlib.editing.graphs as qg
-
+import quantlib.backends as qb 
 
 class DianaModule: # Base class for all diana models  
     def __init__(self,graph_module: fx.graph_module.GraphModule): 
@@ -80,14 +81,21 @@ class DianaModule: # Base class for all diana models
     def true_quantize(self): # integrise model 
         converter = DianaF2TConverter()
         x = torch.rand(3,20,20)
-        self.gmodule = converter(self.gmodule, {'input_1': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 0.020625000819563866])}})
+        self.gmodule = QuantLibRetracer()(converter(self.gmodule, {'input_1': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 0.020625000819563866])}})) 
         self._integrized = True
         pass 
 
-    def export_model(self): 
+    def export_model(self, x : torch.Tensor): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
-            # error 
-            pass 
+            raise NotImplementedError
+
+        exporter = qb.dory.DORYExporter()
+        from pathlib import Path
+       
+        data_folder = Path("../backend/test")
+
+        exporter.export(network=self.gmodule, input_shape=x.shape, path="data_folder")
+        exporter.dump_features(network=self.gmodule, x=x, path="data_folder" ) 
         pass 
 
 

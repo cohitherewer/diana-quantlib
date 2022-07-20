@@ -67,7 +67,7 @@ import quantlib.editing.graphs as qg
  # Testing creation of fake quantized models of diana module from FP models 
 #rn18 = ILSVRC12.ResNet.ResNet('ResNet18')
 
-test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.Conv2d(4, 7, 3), nn.BatchNorm2d(7) , nn.ReLU())
+test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.Conv2d(4, 7, 3), nn.BatchNorm2d(7) , nn.ReLU(), nn.Conv2d(7, 7, 3), nn.BatchNorm2d(7) , nn.ReLU())
 
 converted_graph = bm.DianaModule.fquantize_model8bit(test_modules) 
 converted_graph.start_observing() 
@@ -77,7 +77,12 @@ for i in range(10) :
 converted_graph.stop_observing()
 # true quant 
 converted_graph.true_quantize()
-print(converted_graph.gmodule)
+for i in range(10) : 
+    test_mat = torch.rand(3,3 , 20 ,20 )
+    converted_graph(test_mat)
+
+test_mat = torch.rand(1,3,20,20).floor()
+converted_graph.export_model(test_mat)
 # for _ , module in enumerate(converted_graph.modules()): 
     # print (_ , module)
     # if type(module) == DIANAConv2d: 

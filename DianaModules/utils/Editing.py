@@ -165,7 +165,6 @@ class DianaF2FInterposer(ComposedEditor): #insert quantidentities between
         rewriter = Rewriter(name='DianaInterposer', symbolic_trace_fn=quantlib_symbolic_trace,finder= DianaOpQuantFinder(), applier=DianaOpQuantApplier())
         super(DianaF2FInterposer, self).__init__([rewriter ]) 
         
-
 class DianaF2TConverter(F2TConverter) : 
     def __init__(self) : 
         super().__init__(8) # B here is for the quantized operations used in the bn relu layers. In our case the scale bias layer is 8 bits 
