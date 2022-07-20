@@ -1,5 +1,5 @@
 from quantlib.algorithms.qalgorithms import  register
-from  DianaModules.Digital.DIlayers import DIANAConv2d ,DIANAIdentity, DIANALinear , DIANAReLU
+from  DianaModules.core.operations import DIANAConv2d ,DIANAIdentity, DIANALinear , DIANAReLU
 from torch import nn
 
 from quantlib.algorithms.qalgorithms.modulemapping.modulemapping import ModuleMapping

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 
-from    DianaModules.Digital.DIlayers import DQScaleBias, DIANAIdentity
+from    DianaModules.core.operations import DQScaleBias, DIANAIdentity
 from DianaModules.HWModel.HWModel import SIMDModel
 from typing  import Union
 

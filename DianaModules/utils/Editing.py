@@ -1,7 +1,7 @@
 
 from typing import List, Union
 
-from DianaModules.Digital.DIlayers import DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
+from DianaModules.core.operations import DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
 
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 
@@ -10,6 +10,10 @@ from quantlib.editing.editing.editors.base.rewriter.applier import Applier
 from quantlib.editing.editing.editors.base.rewriter.finder import Finder
 from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
+from quantlib.editing.editing.fake2true import F2TConverter
+from quantlib.editing.editing.fake2true.annotation import F2TAnnotator
+from quantlib.editing.editing.fake2true.annotation.inputdescription import InputDescription, InputDescriptionSpecType
+from quantlib.editing.editing.fake2true.epstunnels.inserter.rewriter import EpsTunnelInserter
 from quantlib.editing.editing.float2fake.canonicalisation import F2FCanonicaliser
 
 from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.retracer import QuantLibHarmonisedAddRetracer
@@ -162,4 +166,7 @@ class DianaF2FInterposer(ComposedEditor): #insert quantidentities between
         super(DianaF2FInterposer, self).__init__([rewriter ]) 
         
 
+class DianaF2TConverter(F2TConverter) : 
+    def __init__(self) : 
+        super().__init__(8) # B here is for the quantized operations used in the bn relu layers. In our case the scale bias layer is 8 bits 
 

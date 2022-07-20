@@ -1,7 +1,8 @@
 from lib2to3.pytree import convert
 import torch
 from torch import nn
-import DianaModules.Digital.DIlayers as di
+from DianaModules.core.operations import DIANAConv2d
+import DianaModules.core.operations as di
 import DianaModules.utils.BaseModules as bm 
 from quantlib.editing.editing.tests import ILSVRC12, common 
 import quantlib.editing.graphs as qg
@@ -64,12 +65,23 @@ import quantlib.editing.graphs as qg
 #print (torch.matmul(x, y))
  
  # Testing creation of fake quantized models of diana module from FP models 
-rn18 = ILSVRC12.ResNet.ResNet('ResNet18')
-test_modules = nn.Sequential(nn.Conv2d(6 , 4 , 3, bias=True), nn.Conv2d(4, 7, 3, bias=True), nn.BatchNorm2d(7))
-converted_graph = bm.DianaModule.fquantize_model8bit(rn18) 
-#print(converted_graph)
-for _ , module in enumerate(converted_graph.modules()): 
-    print (_ , module)
+#rn18 = ILSVRC12.ResNet.ResNet('ResNet18')
+
+test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.Conv2d(4, 7, 3), nn.BatchNorm2d(7) , nn.ReLU())
+
+converted_graph = bm.DianaModule.fquantize_model8bit(test_modules) 
+converted_graph.start_observing() 
+for i in range(10) : 
+    test_mat = torch.rand(3,3 , 20 ,20 )
+    converted_graph(test_mat)
+converted_graph.stop_observing()
+# true quant 
+converted_graph.true_quantize()
+print(converted_graph.gmodule)
+# for _ , module in enumerate(converted_graph.modules()): 
+    # print (_ , module)
+    # if type(module) == DIANAConv2d: 
+        # print(module.is_analog)
         
 #converted_graph.stop_observing()
 
