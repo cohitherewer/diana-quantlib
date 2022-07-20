@@ -73,7 +73,7 @@ class DianaModule: # Base class for all diana models
             addtreeforceoutputeps
          )
       
-        converted_graph =converter(graph) 
+        converted_graph =QuantLibRetracer()(converter(graph) )
         
         return DianaModule(converted_graph)
          
@@ -81,7 +81,7 @@ class DianaModule: # Base class for all diana models
     def true_quantize(self): # integrise model 
         converter = DianaF2TConverter()
         x = torch.rand(3,20,20)
-        self.gmodule = QuantLibRetracer()(converter(self.gmodule, {'input_1': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 0.020625000819563866])}})) 
+        self.gmodule = QuantLibRetracer()(converter(self.gmodule, {'x': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 0.020625000819563866])}})) 
         self._integrized = True
         pass 
 

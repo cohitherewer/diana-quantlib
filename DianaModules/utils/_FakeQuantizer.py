@@ -19,7 +19,6 @@ class _FakeDQuantiser(torch.autograd.Function): # symmetric quantisation
     @staticmethod
     def symbolic(g: torch._C.Graph, input: torch._C.Value) -> torch._C.Value:
         return g.op("Clip", input, g.op("Constant", value_t=torch.tensor(0, dtype=torch.float)))
-        pass 
 
     @staticmethod
     def backward(   ctx, g_in ) : # straight through estimator 
