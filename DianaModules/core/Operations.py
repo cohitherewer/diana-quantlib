@@ -3,7 +3,7 @@ from abc import abstractmethod
 import enum
 
 import torch 
-from torch import nn
+from torch import Tensor, nn
 from typing import Union , Tuple
 
 
@@ -101,6 +101,13 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
 
+class DIANABiasIdentity(QIdentity , DianaBaseOperation) : 
+    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
+
+         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec)
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+         return super().map_scales(new_bitwidth, signed, HW_Behaviour)
+
 class DIANAReLU( PACTReLU  , DianaBaseOperation): 
     def stop_observing(self):
         super().stop_observing() 
@@ -133,9 +140,10 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  padding:                  int = 0,
                  dilation:                 Tuple[int, ...] = 1,
                  groups:                   int = 1 , 
-                 bias : bool = False , not_analog: bool = True 
+                 bias : bool = False , bias_shape : Union [None, torch.Size] = None
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
+                    self.bias_exists = False
                     super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -146,17 +154,41 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                          padding,
                          dilation,
                          groups,
-                         bias=bias) 
+                         bias=False) 
+                    if bias == True: 
+                        self.qbiasdidentity = DIANAIdentity({'bitwidth': 8 , 'signed': True}, 'per-array', 'minmax')
+                        self.register_parameter(name='qbias', param = torch.nn.parameter.Parameter( torch.rand(bias_shape) -0.5)) 
+                        self.qbias.requires_grad = True
+                        self.bias_exists = True
+                        self.bias_shape_set = False
           
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         if self.is_analog:
              self._qop = _FakeAQuantiser.apply
         else: 
             self._qop = _FakeDQuantiser.apply 
-
+ 
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale)
-    
+        return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale) 
+    def forward(self , x: torch.Tensor): 
+        out = 0 
+        if self.bias_exists: 
+            if self.bias_shape_set == False: 
+                Hout=math.floor(((x.shape[2]+2*self.padding[0]-self.dilation[0]*(self.kernel_size[0]-1)-1)/self.stride[0]+1))
+                Wout=math.floor(((x.shape[3]+2*self.padding[1]-self.dilation[1]*(self.kernel_size[1]-1)-1)/self.stride[1]+1))
+                out_shape = torch.Tensor([x.shape[1] , Hout,Wout])
+                if out_shape != self.qbias.shape: 
+                    for i in range(3 -len(self.qbias.shape)): 
+                        self.qbias = nn.parameter.Parameter(self.qbias.unsqueeze(1)) 
+                
+                
+                    self.qbias = nn.parameter.Parameter(self.qbias.expand(self.qbias.shape[0],Hout, Wout))    
+                
+            out =  self.qbiasdidentity(self.qbias).unsqueeze(0).expand(x.shape[0],*self.qbias.shape)
+        
+        
+        return super().forward(x) + out 
+
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             if (self.is_analog): 
@@ -166,6 +198,37 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
+
+    @classmethod
+    def from_fp_module(cls,
+                       fpm:                      nn.Conv2d,
+                       qrangespec:               QRangeSpecType,
+                       qgranularityspec:         QGranularitySpecType,
+                       qhparamsinitstrategyspec: QHParamsInitStrategySpecType) -> QConv2d:
+        """Special constructor to build ``QConv2d``s from FP ``Conv2d``s."""
+        shape = None
+        if fpm.bias is not None: 
+            shape = fpm.bias.shape
+
+        qconv2d = cls(qrangespec,
+                      qgranularityspec,
+                      qhparamsinitstrategyspec,
+                      in_channels=fpm.in_channels,
+                      out_channels=fpm.out_channels,
+                      kernel_size=fpm.kernel_size,
+                      stride=fpm.stride,
+                      padding=fpm.padding,
+                      dilation=fpm.dilation,
+                      groups=fpm.groups,
+                      bias=(fpm.bias is not None), bias_shape = shape)
+
+        # copy parameters over
+        qconv2d.weight.data.copy_(fpm.weight.data)
+        if fpm.bias is not None:
+            qconv2d.qbias.data.copy_(fpm.bias.data)
+
+        return qconv2d
+
 
 ## Classes for emulation . Deprecated . Might leave those if someone wants to create custom models witht the quantized building blocks  
 #class DQScaleBias(DianaModule): # input is quantized

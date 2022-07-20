@@ -92,10 +92,10 @@ class DianaModule: # Base class for all diana models
         exporter = qb.dory.DORYExporter()
         from pathlib import Path
        
-        data_folder = Path("../backend/test")
+        data_folder = Path("backend/test")
 
-        exporter.export(network=self.gmodule, input_shape=x.shape, path="data_folder")
-        exporter.dump_features(network=self.gmodule, x=x, path="data_folder" ) 
+        exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder.absolute())
+        exporter.dump_features(network=self.gmodule, x=x, path=data_folder.absolute() ) 
         pass 
 
 

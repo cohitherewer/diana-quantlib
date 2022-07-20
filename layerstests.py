@@ -72,15 +72,14 @@ class test(nn.Module): # problem with conv of first
         self.conv = nn.Conv2d(3,3,3, bias=False) 
         self.test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.Conv2d(4, 7, 3), nn.BatchNorm2d(7) , nn.ReLU(), nn.Conv2d(7, 7, 3), nn.BatchNorm2d(7) , nn.ReLU())
         
-        self.linear = nn.Linear(1008, 10, bias = False)
     def forward(self, x ): 
-        x = self.test_modules(self.conv(x))
-        x = x.view(x.size(0), -1)
-        print(x.shape)
-        return self.linear(x)
+        return self.test_modules(self.conv(x))
+        
+  
 
 test_modules = test()
-
+test_mat = torch.rand(3,3 , 20 ,20 )
+test_modules(test_mat)
 converted_graph = bm.DianaModule.fquantize_model8bit(test_modules) 
 converted_graph.start_observing() 
 for i in range(10) : 
@@ -97,12 +96,12 @@ for i in range(10) :
     converted_graph(test_mat)
 
 test_mat = torch.rand(1,3,20,20).floor()
-#converted_graph.export_model(test_mat)
+
 print ("After true quantization") 
 for _ , module in enumerate(converted_graph.modules()): 
     print (_ , type(module))
-    # if type(module) == DIANAConv2d: 
-        # print(module.is_analog)
-        
+    if type(module) == DIANAConv2d: 
+        print(module.is_analog)
+converted_graph.export_model(test_mat)    
 #converted_graph.stop_observing()
 
