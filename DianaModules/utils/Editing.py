@@ -1,4 +1,5 @@
 
+import itertools
 from typing import List, Union
 
 import torch
@@ -13,6 +14,9 @@ from quantlib.editing.editing.editors.base.rewriter.finder import Finder
 from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 from quantlib.editing.editing.editors.nnmodules.applicationpoint import NodesMap
 from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
+from quantlib.editing.editing.editors.nnmodules.finder.base import NNModuleMatcher
+from quantlib.editing.editing.editors.nnmodules.pattern.base.pattern import NNModulePattern
+
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.factory import generate_named_patterns
 from quantlib.editing.editing.editors.nnmodules.rewriter.rewriter import NNModuleRewriter
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -30,12 +34,27 @@ from quantlib.editing.editing.float2fake.canonicalisation import F2FCanonicalise
 from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.retracer import QuantLibHarmonisedAddRetracer
 from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.rewriter import AddTreeHarmoniser
 
-from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.modulewisedescription.modulewisedescription import ModuleWiseDescriptionSpecType
+
 from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.rewriter import ModuleWiseConverter
 from quantlib.editing.editing.float2fake.quantisation.qdescription.qdescription import QDescriptionSpecType
 
 import torch.fx as fx
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
+
+class _DianaNode:
+    def __init__(self, type:str, node: fx.node.Node) -> None:
+        self._node = node 
+        self._type = type 
+    @property 
+    def node(self): 
+        return self._node
+    @property 
+    def type(self): 
+        return self._type
+   
+class DianaAps(ApplicationPoint, _DianaNode):
+    
+    pass
 
 class DianaF2FConverter(ComposedEditor):
     """General-purpose converter to map floating-point networks into
@@ -49,11 +68,14 @@ class DianaF2FConverter(ComposedEditor):
 
         super(DianaF2FConverter, self).__init__([
             F2FCanonicaliser(),
+         
+            ReLUAbsorber() ,    # edit relu 
             DianaF2FQuantiser(
                 modulewisedescriptionspec,
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps,
             )
+         
         ])
 # this assumes that each module has fake-quantized identity output mapping (NO need for QuantiserInterposer).
 class DianaF2FQuantiser(ComposedEditor):
@@ -72,29 +94,67 @@ class DianaF2FQuantiser(ComposedEditor):
             AddTreeHarmoniser(
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps
-            ),DianaF2FInterposer() 
+            ),# Edit conv layers reLU functionalities 
+            DianaF2FInterposer() 
 
         ]) # Add interposer here 
+
+class ReLUFinder(Finder) : 
+    def __init__(self) -> None:
+        super().__init__()
+    def find(self, g: fx.GraphModule) -> List[ApplicationPoint]:
+        aps : List[DianaAps]  
+        for node in g.graph.nodes: 
+            if type(g.get_submodule(node.target) ) == nn.ReLU: 
+                aps.append(DianaAps('', node)) 
+        return aps 
+
+class ReLURemover(Applier) : 
+    def __init__(self):
+        super().__init__()
+
+    def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
+
+        node = ap.node
+
+        # the `fx.Node` is functionally equivalent to the identity, so we connect its (unique) input to all the outputs
+        predecessors = {p for p in node.all_input_nodes}  # upstream
+        assert len(predecessors) == 1
+        successors = {s for s in node.users}  # downstream
+        for p, s in itertools.product(predecessors, successors):
+            s.replace_input_with(node, p)
+
+        g.delete_submodule(node.target)
+        g.graph.erase_node(node)
+
+class ReLUAbsorber(Rewriter) : 
+    def __init__(self):
+        finder = ReLUFinder()
+        applier = ReLURemover()
+        super().__init__("ReLU_Remover", quantlib_symbolic_trace, finder, applier)
+
+# TRUE INTEGRISATION 
 
 # Modules to look for DIANAConv2d , DIANALinear , AvgPool2d  
 from torch import  nn 
 
-class _DianaNode:
-    def __init__(self, type:str, node: fx.node.Node) -> None:
-        self._node = node 
-        self._type = type 
-    @property 
-    def node(self): 
-        return self._node
-    @property 
-    def type(self): 
-        return self._type
-   
 
-class DianaAps(ApplicationPoint, _DianaNode):
-    
-    pass
+
+
+########################### Linear Op ###########################
+class DianaLinearOpMatcher(NNModuleMatcher) : 
+    pass 
+class DianaLinearOpIntegriserApplier(NNModuleApplier): 
+    def __init__(self, pattern: NNModulePattern):
+        super().__init__(pattern)
+    def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
+        return super()._apply(g, ap, id_)
+
+
+
+########################### Quantizers interposer ###########################
 MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear , nn.AvgPool2d , nn.AdaptiveAvgPool2d]
+
 class DianaOpQuantFinder(Finder):
 
     def __init__(self):
@@ -175,7 +235,11 @@ class DianaF2FInterposer(ComposedEditor): #insert quantidentities between
     def __init__(self):
         rewriter = Rewriter(name='DianaInterposer', symbolic_trace_fn=quantlib_symbolic_trace,finder= DianaOpQuantFinder(), applier=DianaOpQuantApplier())
         super(DianaF2FInterposer, self).__init__([rewriter ]) 
-        
+
+########################### END ###########################
+
+########################### True Quantization ###########################
+
 class DianaF2TConverter(ComposedEditor) : 
     def __init__(self) : 
         editors = [
@@ -204,9 +268,15 @@ class DianaF2TConverter(ComposedEditor) :
 
         return g
 
+
+
+########################### Mixed Percision Requant ###########################
+
 # Mixed percisionn requantiser 
 from quantlib.editing.editing.fake2true.integerisation.requantiser import roles , _BN_KWARGS,_EPS_KWARGS,admissible_screenplays
 from quantlib.editing.editing.editors.nnmodules import NNSequentialPattern
+
+# write your own linear op integriser 
 
 def get_rewriter_class(class_name: str,
                        pattern: NNSequentialPattern):
@@ -219,50 +289,7 @@ def get_rewriter_class(class_name: str,
 
     return class_
 
-class DianaLinearOpIntegeriserApplier(Applier ) : 
-    pass 
-    @staticmethod
-    def from_qlinear(qlinear: _QModule) -> nn.Module:
-        """Return an ``nn.Module`` implementing a linear operation with
-        integerised parameters.
-        """
-        # TODO: should I offload the responsibility of computing the true-quantised `nn.Module` to `_QLinear`?
-        if not isinstance(qlinear, SUPPORTED_LINEAR_FPMODULES):
-            raise TypeError
-        
-        if isinstance(qlinear, nn.Linear):
-            class_ = nn.Linear
-            new_module = class_(in_features=qlinear.in_features,
-                                out_features=qlinear.out_features,
-                                bias=qlinear.bias)
-
-        elif isinstance(qlinear, (nn.Conv1d, nn.Conv2d, nn.Conv3d,)):
-            if isinstance(qlinear, nn.Conv1d):
-                class_ = nn.Conv1d
-            elif isinstance(qlinear, nn.Conv2d):
-                class_ = nn.Conv2d
-            else:  # `isinstance(qlinear, nn.Conv3d)`
-                class_ = nn.Conv3d
-            new_module = class_(in_channels=qlinear.in_channels,
-                                out_channels=qlinear.out_channels,
-                                kernel_size=qlinear.kernel_size,
-                                stride=qlinear.stride,
-                                padding=qlinear.padding,
-                                dilation=qlinear.dilation,
-                                groups=qlinear.groups,
-                                bias=qlinear.bias)
-
-        else:
-            raise RuntimeError
-
-        iweight = torch.round(qlinear.qweight.data.clone().detach() / qlinear.scale.data.clone().detach())  # integerised parameters
-        # biases are going to be 32 bits in the digital core
-        # add qlinear bias later . now it's just the digital core 
-        new_module.weight.data = iweight
-        new_module.bias.data = qlinear.bias.data.clone().detach() 
-        return new_module
-
-class DianaRequantizerApplier(RequantiserApplier): 
+class DianaRequantizerApplier(RequantiserApplier): # this will probably have to be rewritten 
     def __init__(self, pattern: NNSequentialPattern):
         super().__init__(pattern, 8) 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
@@ -281,10 +308,6 @@ class DianaRequantizerApplier(RequantiserApplier):
 
         return super()._apply(g, ap, id_)
 
-
-
-
-
 # create the general-purpose `Requantiser`
 class DianaRequantizer(ComposedEditor):
     def __init__(self):
@@ -296,6 +319,3 @@ class DianaRequantizer(ComposedEditor):
             namespace[class_name] = class_   
         super(DianaRequantizer, self).__init__([class_() for class_ in namespace.values()])
 
-
-    
-# if bn is not none then self.d = 8 bits 

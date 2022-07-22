@@ -62,7 +62,7 @@ class DianaModule: # Base class for all diana models
     @classmethod 
     def fquantize_model8bit(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
-            ({'types': ('Identity','ReLU')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'const','DIANA')), 
+            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'const','DIANA')), 
             ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'const','DIANA')), # can use per-outchannel here 
         )
             

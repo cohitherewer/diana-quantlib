@@ -15,6 +15,7 @@ from quantlib.algorithms.qbase.qrange.qrange import resolve_qrangespec
 
 
 from quantlib.algorithms.qmodules.qmodules import  QIdentity
+from quantlib.algorithms.qmodules.qmodules.qactivations import QReLU
 
 from quantlib.algorithms.qmodules.qmodules.qlinears import QConv2d, QLinear 
 
@@ -68,7 +69,7 @@ class DIANALinear(QLinear , DianaBaseOperation):
     
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 7, 'signed': True}) 
+            self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})              
 # Activations
@@ -113,6 +114,7 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
             return 6 
         else:
             return 8 
+
 class DIANABiasIdentity(QIdentity , DianaBaseOperation) : 
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
 
@@ -120,24 +122,31 @@ class DIANABiasIdentity(QIdentity , DianaBaseOperation) :
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
          return super().map_scales(new_bitwidth, signed, HW_Behaviour)
 
-class DIANAReLU( PACTReLU  , DianaBaseOperation): 
-    def stop_observing(self):
-        super().stop_observing() 
-        self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
-        # edit the scale
 
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
 
-        if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 7, 'signed': True})
 
-            #  clip here and freeze 
-            self.freeze() 
+# Deprecated: not supported by hardware 
+#class DIANAReLU( PACTReLU  , DianaBaseOperation): 
+    #def stop_observing(self):
+        #super().stop_observing() 
+        #self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
+        ## edit the scale
+
+    #def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+
+        #if HW_Behaviour: 
+            #self.redefine_qhparams({'bitwidth' : 7, 'signed': True})
+
+            ##  clip here and freeze 
+            #self.freeze() 
             
 
             
-        else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+        #else : 
+            #self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+
+
+
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
 class DIANAConv2d(QConv2d , DianaBaseOperation):
     
@@ -155,7 +164,8 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  bias : bool = False 
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
-                    self.bias_exists = False
+                    self.relu = nn.ReLU() # this is to simulate hardware behaviours 
+                    self.enable_relu_for_analog  = True # if it's not used in harmonise adds then this is set to false 
                     super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -166,13 +176,8 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                          padding,
                          dilation,
                          groups,
-                         bias=False) 
-                    if bias == True: 
-                        self.qbiasdidentity = DIANAIdentity({'bitwidth': 8 , 'signed': True}, 'per-array', 'minmax')
-                        self.register_parameter(name='qbias', param = torch.nn.parameter.Parameter( torch.rand(out_channels ) -0.5)) 
-                        self.qbias.requires_grad = True
-                        self.bias_exists = True
-                        self.bias_shape_set = False
+                         bias=bias) # you can remove all this bias stuff 
+
           
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         if self.is_analog:
@@ -183,13 +188,12 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale) 
     def forward(self , x: torch.Tensor): 
-        out = 0 
-        
-        conv_out = super().forward(x) 
-        if self.bias_exists: 
-            out = self.qbiasdidentity(self.qbias.unsqueeze(1).unsqueeze(1).expand(conv_out.shape[1:]).unsqueeze(0).expand(conv_out.shape) ) # broadcasting  
-        return conv_out  +out 
-
+        if self.is_analog == False or self.enable_relu_for_analog : 
+            # digital core then auto ReLU 
+            return self.relu(super()(x))
+        return super()(x) 
+            
+     
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             if (self.is_analog): 
@@ -200,35 +204,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
 
-    @classmethod
-    def from_fp_module(cls,
-                       fpm:                      nn.Conv2d,
-                       qrangespec:               QRangeSpecType,
-                       qgranularityspec:         QGranularitySpecType,
-                       qhparamsinitstrategyspec: QHParamsInitStrategySpecType) -> QConv2d:
-        """Special constructor to build ``QConv2d``s from FP ``Conv2d``s."""
-        shape = None
-        if fpm.bias is not None: 
-            shape = fpm.bias.shape
 
-        qconv2d = cls(qrangespec,
-                      qgranularityspec,
-                      qhparamsinitstrategyspec,
-                      in_channels=fpm.in_channels,
-                      out_channels=fpm.out_channels,
-                      kernel_size=fpm.kernel_size,
-                      stride=fpm.stride,
-                      padding=fpm.padding,
-                      dilation=fpm.dilation,
-                      groups=fpm.groups,
-                      bias=(fpm.bias is not None))
-
-        # copy parameters over
-        qconv2d.weight.data.copy_(fpm.weight.data)
-        if fpm.bias is not None:
-            qconv2d.qbias.data.copy_(fpm.bias.data)
-
-        return qconv2d
 
 
 ## Classes for emulation . Deprecated . Might leave those if someone wants to create custom models witht the quantized building blocks  
