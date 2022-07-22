@@ -1,6 +1,7 @@
 
 from abc import abstractmethod
 import enum
+from numpy import require
 
 import torch 
 from torch import Tensor, nn
@@ -37,6 +38,9 @@ class DianaBaseOperation:
         self.step=  torch.tile(step,    self._observer.broadcasting_shape)
         self.scale =  torch.tile(scale,   self._observer.broadcasting_shape)
         self._init_qhparams() # reinitialize scale and zero 
+    def get_bitwidth(self): 
+        pass
+
 
 class IdentityType(enum.Enum):  
     default = enum.auto() # 8 Bits 
@@ -92,15 +96,23 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         if HW_Behaviour: 
             if self._type == IdentityType.default: 
                 self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
-            if self._type == IdentityType.AIMC_IN: 
+            elif self._type == IdentityType.AIMC_IN: 
                 self.redefine_qhparams({'bitwidth' : 7, 'signed': True}) 
-            if self._type == IdentityType.AIMC_OUT: 
+            elif self._type == IdentityType.AIMC_OUT: 
                 self.redefine_qhparams({'bitwidth' : 6, 'signed': True}) 
             else:
                 self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
-
+    def get_bitwidth(self):
+        if self._type == IdentityType.default: 
+            return 8 
+        elif self._type == IdentityType.AIMC_IN: 
+            return 7 
+        elif self._type == IdentityType.AIMC_OUT: 
+            return 6 
+        else:
+            return 8 
 class DIANABiasIdentity(QIdentity , DianaBaseOperation) : 
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
 
@@ -140,7 +152,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  padding:                  int = 0,
                  dilation:                 Tuple[int, ...] = 1,
                  groups:                   int = 1 , 
-                 bias : bool = False , bias_shape : Union [None, torch.Size] = None
+                 bias : bool = False 
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
                     self.bias_exists = False
@@ -157,7 +169,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                          bias=False) 
                     if bias == True: 
                         self.qbiasdidentity = DIANAIdentity({'bitwidth': 8 , 'signed': True}, 'per-array', 'minmax')
-                        self.register_parameter(name='qbias', param = torch.nn.parameter.Parameter( torch.rand(bias_shape) -0.5)) 
+                        self.register_parameter(name='qbias', param = torch.nn.parameter.Parameter( torch.rand(out_channels ) -0.5)) 
                         self.qbias.requires_grad = True
                         self.bias_exists = True
                         self.bias_shape_set = False
@@ -172,22 +184,11 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
         return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale) 
     def forward(self , x: torch.Tensor): 
         out = 0 
+        
+        conv_out = super().forward(x) 
         if self.bias_exists: 
-            if self.bias_shape_set == False: 
-                Hout=math.floor(((x.shape[2]+2*self.padding[0]-self.dilation[0]*(self.kernel_size[0]-1)-1)/self.stride[0]+1))
-                Wout=math.floor(((x.shape[3]+2*self.padding[1]-self.dilation[1]*(self.kernel_size[1]-1)-1)/self.stride[1]+1))
-                out_shape = torch.Tensor([x.shape[1] , Hout,Wout])
-                if out_shape != self.qbias.shape: 
-                    for i in range(3 -len(self.qbias.shape)): 
-                        self.qbias = nn.parameter.Parameter(self.qbias.unsqueeze(1)) 
-                
-                
-                    self.qbias = nn.parameter.Parameter(self.qbias.expand(self.qbias.shape[0],Hout, Wout))    
-                
-            out =  self.qbiasdidentity(self.qbias).unsqueeze(0).expand(x.shape[0],*self.qbias.shape)
-        
-        
-        return super().forward(x) + out 
+            out = self.qbiasdidentity(self.qbias.unsqueeze(1).unsqueeze(1).expand(conv_out.shape[1:]).unsqueeze(0).expand(conv_out.shape) ) # broadcasting  
+        return conv_out  +out 
 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
@@ -220,7 +221,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                       padding=fpm.padding,
                       dilation=fpm.dilation,
                       groups=fpm.groups,
-                      bias=(fpm.bias is not None), bias_shape = shape)
+                      bias=(fpm.bias is not None))
 
         # copy parameters over
         qconv2d.weight.data.copy_(fpm.weight.data)

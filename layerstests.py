@@ -89,19 +89,21 @@ converted_graph.stop_observing()
 print ("After fake quantization") 
 for _ , module in enumerate(converted_graph.modules()): 
     print (_ , type(module))
+
+#converted_graph.map_scales(HW_Behaviour=True)
 # true quant 
 converted_graph.true_quantize()
 for i in range(10) : 
     test_mat = torch.rand(3,3 , 20 ,20 )
     converted_graph(test_mat)
 
-test_mat = torch.rand(1,3,20,20).floor()
+test_mat = (torch.rand(1,3,20,20)*255).floor()
 
 print ("After true quantization") 
 for _ , module in enumerate(converted_graph.modules()): 
     print (_ , type(module))
     if type(module) == DIANAConv2d: 
         print(module.is_analog)
-converted_graph.export_model(test_mat)    
+#converted_graph.export_model(test_mat)    
 #converted_graph.stop_observing()
 

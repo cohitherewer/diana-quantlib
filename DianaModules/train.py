@@ -99,8 +99,6 @@ validation_dataset = ds.MNIST(root="./data/MNIST/valid" , train = False, downloa
 
 
 
-
-
 # Training system without quantisation hyperparameters training algorithms 
 # Train the network with full precision floating point numbers but have quantisation layers observe range of inputs 
 
