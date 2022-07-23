@@ -69,7 +69,7 @@ import quantlib.editing.graphs as qg
 class digital_core_test(nn.Module): # problem with conv of first
     def __init__(self): 
         super().__init__()
-        self.test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.ReLU() , nn.Conv2d(4, 7, 3), nn.ReLU(),nn.ReLU())
+        self.test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.ReLU() , nn.Conv2d(4, 7, 3), nn.ReLU())
         
     def forward(self, x ): 
         return self.test_modules(x)
@@ -104,6 +104,6 @@ for _ , module in enumerate(converted_graph.modules()):
     if type(module) == DIANAConv2d: 
         print(module.is_analog)
         
-#converted_graph.export_model(test_mat)    
+converted_graph.export_model(test_mat)    
 #converted_graph.stop_observing()
 
