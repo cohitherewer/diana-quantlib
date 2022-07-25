@@ -6,13 +6,9 @@ from typing import Any, Dict, Union
 import matplotlib as plt 
 
 from DianaModules.core.operations import DianaBaseOperation
+from DianaModules.utils.onnx import DianaExporter
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
 from .Editing import DianaF2FConverter, DianaF2TConverter
-from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qmodules import _PACTModule
-
-from quantlib.algorithms.qbase.qhparams.qhparams import create_qhparams
-from quantlib.algorithms.qbase.qrange.qrange import QRangeSpecType, resolve_qrangespec
-from quantlib.algorithms.qbase import QRangeSpecType
 
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 import torch 
@@ -48,8 +44,7 @@ class DianaModule: # Base class for all diana models
         for _ ,module in enumerate(self.gmodule.modules()):  
             if issubclass(type(module), _QModule) and module._is_quantised: 
                 module.scale = torch.tensor(2**floor(log2(module.scale))) 
-                if issubclass(type(module), _PACTModule): # Pact activations 
-                    module.clip_hi =  torch.tensor(2**floor(log2(module.clip_hi))) 
+               
                     
             elif (issubclass(type(module),DianaModule) and self is not module) : 
                 module.clip_scales() # recursion
@@ -85,7 +80,7 @@ class DianaModule: # Base class for all diana models
     def true_quantize(self): # integrise model 
         converter = DianaF2TConverter()
         x = torch.rand(3,20,20)
-        self.gmodule = QuantLibRetracer()(converter(self.gmodule, {'x': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 0.020625000819563866])}})) 
+        self.gmodule = QuantLibRetracer()(converter(self.gmodule, {'x': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 1])}})) 
         self._integrized = True
         pass 
 
@@ -93,7 +88,7 @@ class DianaModule: # Base class for all diana models
         if not self._integrized: 
             raise NotImplementedError
 
-        exporter = qb.dory.DORYExporter()
+        exporter = DianaExporter()
         from pathlib import Path
        
         data_folder = Path("backend/test")

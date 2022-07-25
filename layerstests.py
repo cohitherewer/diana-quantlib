@@ -3,7 +3,9 @@ import torch
 from torch import nn
 from DianaModules.core.operations import DIANAConv2d
 import DianaModules.core.operations as di
-import DianaModules.utils.BaseModules as bm 
+import DianaModules.utils.BaseModules as bm
+from DianaModules.utils.DigitalRequant import DigitalRequantizer
+
 from quantlib.editing.editing.tests import ILSVRC12, common 
 import quantlib.editing.graphs as qg
 #from Digital.DIlayers import DQIdentity, DQScaleBias, DQFC
@@ -69,22 +71,29 @@ import quantlib.editing.graphs as qg
 class digital_core_test(nn.Module): # problem with conv of first
     def __init__(self): 
         super().__init__()
+        self.conv1 = nn.Sequential( nn.Conv2d (3 ,3, 2 ), nn.ReLU())
         self.test_modules = nn.Sequential(nn.Conv2d(3 , 4 , 3, bias=True), nn.ReLU() , nn.Conv2d(4, 7, 3), nn.ReLU())
-        
+        self.conv2 = nn.Sequential(nn.Conv2d(3 , 7, 5) , nn.ReLU())
     def forward(self, x ): 
-        return self.test_modules(x)
+        out_1 = self.test_modules(self.conv1(x))
+        print(out_1.shape) 
+        out_2 = self.conv2(self.conv1(x) ) 
+        print(out_2.shape)
+        return  out_1+ out_2
         
   
 
 test_modules = digital_core_test()
-test_mat = torch.rand(3,3 , 20 ,20 )
+test_mat = torch.rand(3,3 , 20 ,20 )*255
 test_modules(test_mat)
 converted_graph = bm.DianaModule.fquantize_model8bit(test_modules) 
 converted_graph.start_observing() 
+
 for i in range(10) : 
-    test_mat = torch.rand(3,3 , 20 ,20 )
+    test_mat = torch.rand(3,3 , 20 ,20 )*255
     converted_graph(test_mat)
 converted_graph.stop_observing()
+converted_graph.clip_scales() 
 print ("After fake quantization") 
 for _ , module in enumerate(converted_graph.modules()): 
     print (_ , type(module))
@@ -92,17 +101,13 @@ for _ , module in enumerate(converted_graph.modules()):
 #converted_graph.map_scales(HW_Behaviour=True)
 # true quant 
 converted_graph.true_quantize()
-for i in range(10) : 
-    test_mat = torch.rand(3,3 , 20 ,20 )
-    converted_graph(test_mat)
 
 test_mat = (torch.rand(1,3,20,20)*255).floor()
 
 print ("After true quantization") 
 for _ , module in enumerate(converted_graph.modules()): 
     print (_ , type(module))
-    if type(module) == DIANAConv2d: 
-        print(module.is_analog)
+    
         
 converted_graph.export_model(test_mat)    
 #converted_graph.stop_observing()

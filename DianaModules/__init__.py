@@ -9,3 +9,27 @@ NNMODULE_TO_DIANA = ModuleMapping ([
     (nn.Conv2d , DIANAConv2d) ])
     
 register['DIANA'] = NNMODULE_TO_DIANA
+#import onnx
+#import torch 
+#def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs):
+    #n = ctx.cur_node
+   
+    
+    #name = kwargs["name"]
+    #ret = None
+    #if name == "DigitalQuantOp":
+       
+        #ret =g.op("Clip" ,g.op("Floor", g.op("Div", args[0] , args[1] )) , args[2] , args[3]) 
+        
+   
+    #else:
+        ## Logs a warning and returns None
+        #return torch._unimplemented("prim::PythonOp", "unknown node kind: " + name)
+    ## Copy type and shape from original node.
+    
+
+    #ret.setType(n.output().type())
+    #return ret
+
+#from torch.onnx import register_custom_op_symbolic
+#register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)

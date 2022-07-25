@@ -1,10 +1,12 @@
 
 import itertools
+import math
 from typing import List, OrderedDict, Union
 
 import torch
 
 from DianaModules.core.operations import DIANAIdentity, DIANALinear, DIANAReLU, IdentityType , DIANAConv2d
+import DianaModules.utils.DigitalRequant as dq
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QActivation, _QModule
 
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
@@ -25,14 +27,12 @@ from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.rol
 from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
 from quantlib.editing.editing.editors.nnmodules.rewriter.rewriter import NNModuleRewriter
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
-from quantlib.editing.editing.fake2true import F2TConverter
 from quantlib.editing.editing.fake2true.annotation import F2TAnnotator
 from quantlib.editing.editing.fake2true.annotation.inputdescription import InputDescription, InputDescriptionSpecType
 from quantlib.editing.editing.fake2true.epstunnels.inserter.rewriter import EpsTunnelInserter
 from quantlib.editing.editing.fake2true.epstunnels.remover.rewriter import EpsTunnelRemover
 from quantlib.editing.editing.fake2true.epstunnels.simplifier.rewriter import EpsTunnelConstructSimplifier
-from quantlib.editing.editing.fake2true.integerisation.linearopintegeriser import LinearOpIntegeriser
-from quantlib.editing.editing.fake2true.integerisation.requantiser.applier import RequantiserApplier
+
 from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import RequantiserMatcher
 from quantlib.editing.editing.float2fake.canonicalisation import F2FCanonicaliser
 
@@ -46,7 +46,7 @@ from quantlib.editing.editing.float2fake.quantisation.qdescription.qdescription 
 import torch.fx as fx
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 # Mixed percisionn requantiser 
-from quantlib.editing.editing.fake2true.integerisation.requantiser import roles , _EPS_KWARGS,admissible_screenplays
+
 from quantlib.editing.editing.editors.nnmodules import NNSequentialPattern
 from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
 
@@ -99,12 +99,13 @@ class DianaF2FQuantiser(ComposedEditor):
             QuantLibRetracer(),
             ModuleWiseConverter(modulewisedescriptionspec),
        
-            ReLUAbsorber() ,    # edit relu 
+           
             QuantLibHarmonisedAddRetracer(),
             AddTreeHarmoniser(
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps
             ),# Edit conv layers reLU functionalities 
+             ReLUAbsorber() ,    # edit relu 
             DianaF2FInterposer()  , 
             DianaQuantizerFuser()
         ]) # Add interposer here 
@@ -142,18 +143,11 @@ class ReLURemover(Applier) :
         node = ap.node
 
         # the `fx.Node` is functionally equivalent to the identity, so we connect its (unique) input to all the outputs
-        predecessors = {p for p in node.all_input_nodes}  # upstream
+        predecessors = [p for p in node.all_input_nodes]  # upstream
         assert len(predecessors) == 1
+        node.replace_all_uses_with(predecessors[0]) 
         
-        successors = {s for s in node.users}  # downstream
-        for p, s in itertools.product(predecessors, successors):
-            # set relu out on 
-            prev = g.get_submodule(p.target) 
-            if type(prev) == DIANAConv2d: 
-                # print
-                prev.set_relu_out() 
-            s.replace_input_with(node, p)
-
+        
 
         g.delete_submodule(node.target)
         g.graph.erase_node(node)
@@ -164,6 +158,62 @@ class ReLUAbsorber(Rewriter) :
         finder = ReLUFinder()
         applier = ReLURemover()
         super().__init__("ReLU_Remover", quantlib_symbolic_trace, finder, applier)
+
+
+#region DianaActivationFuser
+#### Fuser ### 
+# there will always be an output quantizer for analog conv. #fuse div clips than onlu have 1 out and their bitwidth is the same (scale of 1 of 2nd activations)
+
+class DianaQuantizerFuserFinder(Finder) : 
+    def __init__(self) -> None:
+        super().__init__()
+    def find(self, g: fx.GraphModule) -> List[DianaAps]:
+        aps : List[DianaAps]
+        aps = [] 
+        #name_to_module #get names and modules with activations 
+        # get modules first 
+        names = []
+        for name ,_ in g.named_modules(): 
+            if(issubclass(type(g.get_submodule(name)) , _QActivation)): 
+                names.append(name)
+            
+        for node in g.graph.nodes: 
+            if node.target in names : 
+                users = [ u for u in node.users ] 
+                if len(users) == 1 and users[0].target in names:# and  issubclass(type(g.get_submodule(users[0].target)), _QActivation): 
+                    aps.append(DianaAps('' , node))
+        return aps 
+    def check_aps_commutativity(self, aps: List[ApplicationPoint]) -> bool:
+        return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
+class DianaQuantizerFuserApplier(Applier) : 
+    def __init__(self):
+        super().__init__()
+    def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
+        post_node = [u for u in ap.node.users][0]
+        post_module  = g.get_submodule(post_node.target) 
+        cur_module = g.get_submodule(ap.node.target) 
+        lower_bitwidth = 0 if (min(post_module.n_levels, cur_module.n_levels) == cur_module.n_levels ) else 1
+        if lower_bitwidth == 0 : 
+            #if it's 0 then remove post_node 
+            post_node_users = [u for u in post_node.users ]
+            for p_node in post_node_users: 
+                p_node.replace_input_with(post_node, ap.node)
+            g.delete_submodule(post_node.target)
+            g.graph.erase_node(post_node)
+        else: 
+            predecessors = [p for p in p.all_input_nodes]  # upstream
+            assert len(predecessors)  == 1
+            post_node.replace_input_with(ap.node ,predecessors[0] )
+            g.delete_submodule(ap.node.target)
+            g.graph.erase_node(ap.node)
+        return g 
+#this class is used for fusing activations in true to fake 
+class DianaQuantizerFuser(Rewriter) :
+    def __init__(self):
+        super().__init__("DianaActivationFuser", quantlib_symbolic_trace, DianaQuantizerFuserFinder(), DianaQuantizerFuserApplier())
+     
+#endregion
+
 
 # TRUE INTEGRISATION 
 
@@ -183,7 +233,7 @@ class DianaF2TConverter(ComposedEditor) :
             DianaLinearOpIntegrizer(), 
 
             DianaRequantizer(),
-        
+            QuantLibRetracer(),
             EpsTunnelConstructSimplifier(),
             EpsTunnelRemover()
         ]
@@ -298,61 +348,6 @@ class DianaF2FInterposer(ComposedEditor): #insert quantidentities between
 
 
 
-#### Fuser ### 
-# there will always be an output quantizer for analog conv. #fuse div clips than onlu have 1 out and their bitwidth is the same (scale of 1 of 2nd activations)
-
-class DianaQuantizerFuserFinder(Finder) : 
-    def __init__(self) -> None:
-        super().__init__()
-    def find(self, g: fx.GraphModule) -> List[DianaAps]:
-        aps : List[DianaAps]
-        aps = [] 
-        #name_to_module #get names and modules with activations 
-        # get modules first 
-        names = []
-        for name ,_ in g.named_modules(): 
-            if(issubclass(type(g.get_submodule(name)) , _QActivation)): 
-                names.append(name)
-            
-        for node in g.graph.nodes: 
-            if node.target in names : 
-                users = [ u for u in node.users ] 
-                if len(users) == 1 and users[0].target in names:# and  issubclass(type(g.get_submodule(users[0].target)), _QActivation): 
-                    aps.append(DianaAps('' , node))
-        return aps 
-    def check_aps_commutativity(self, aps: List[ApplicationPoint]) -> bool:
-        return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
-class DianaQuantizerFuserApplier(Applier) : 
-    def __init__(self):
-        super().__init__()
-    def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
-        post_node = [u for u in ap.node.users][0]
-        post_module  = g.get_submodule(post_node.target) 
-        cur_module = g.get_submodule(ap.node.target) 
-        lower_bitwidth = 0 if (min(post_module.n_levels, cur_module.n_levels) == cur_module.n_levels ) else 1
-        if lower_bitwidth == 0 : 
-            #if it's 0 then remove post_node 
-            post_node_users = [u for u in post_node.users ]
-            for p_node in post_node_users: 
-                p_node.replace_input_with(post_node, ap.node)
-            g.delete_submodule(post_node.target)
-            g.graph.erase_node(post_node)
-        else: 
-            predecessors = [p for p in p.all_input_nodes]  # upstream
-            assert len(predecessors)  == 1
-            post_node.replace_input_with(ap.node ,predecessors[0] )
-            g.delete_submodule(ap.node.target)
-            g.graph.erase_node(ap.node)
-        return g 
-#this class is used for fusing activations in true to fake 
-class DianaQuantizerFuser(Rewriter) :
-    def __init__(self):
-        super().__init__("DianaActivationFuser", quantlib_symbolic_trace, DianaQuantizerFuserFinder(), DianaQuantizerFuserApplier())
-     
-
-
-
-
 #region LinearOpIntegrizer
 SUPPORTED_LINEAR_FPMODULES = (nn.Linear , nn.Conv2d) 
 
@@ -429,11 +424,11 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
         return g
 
 ##################### DEFINING VARS #########################
-_EPS = torch.Tensor([1.0])
+
 di_roles = Roles([
 
     ('eps_in',  Candidates([
-        ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
+        ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
 
     ('linear', Candidates([
@@ -442,7 +437,7 @@ di_roles = Roles([
     ])),
 
     ('eps_out', Candidates([
-        ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
+        ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
 ])
    
@@ -471,25 +466,75 @@ class DianaLinearOpIntegrizer(ComposedEditor):
 
 #region Requantizer (requantizer at output of operations)
 
+from quantlib.editing.editing.fake2true.integerisation.requantiser import roles , _EPS_KWARGS,admissible_screenplays
 
-class DianaRequantizerApplier(RequantiserApplier): # this will probably have to be rewritten 
+class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be rewritten 
     def __init__(self, pattern: NNSequentialPattern):
-        super().__init__(pattern, 8) 
+        super().__init__(pattern) 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
-        # I have to rewrite this 
+        # get handles on matched `fx.Node`s
         name_to_match_node = self.pattern.name_to_match_node(nodes_map=ap)
+        node_eps_in     = name_to_match_node['eps_in']
         node_bn         = name_to_match_node['bn'] if 'bn' in name_to_match_node.keys() else None
+        node_activation = name_to_match_node['activation']
+        node_eps_out    = name_to_match_node['eps_out']
+
+        # get handles on matched `nn.Module`s
         name_to_match_module = self.pattern.name_to_match_module(nodes_map=ap, data_gm=g)
+        module_eps_in     = name_to_match_module['eps_in']
+        module_bn         = name_to_match_module['bn'] if 'bn' in name_to_match_module.keys() else None
         module_activation = name_to_match_module['activation']
-        if node_bn is not None: # what if we have a batch norm followed by a harmonise add. just do it in 8 bits? # assumes bn is always followed by relu 
-            self._D = torch.Tensor([2**8]) # 8 bits 
-        elif type(module_activation)== DIANAIdentity: 
-            self._D = torch.Tensor([module_activation.get_bitwidth()]) 
+        module_eps_out    = name_to_match_module['eps_out']
 
-        #could remove quant layer here if it's taken care of in hardware like in the adc 
+        assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
 
+        # extract the parameters required to compute the requantiser's parameters
+        eps_in  = module_eps_in.eps_out
+        mi      = module_bn.running_mean if module_bn is not None else torch.zeros_like(eps_in)
+        sigma   = torch.sqrt(module_bn.running_var + module_bn.eps) if module_bn is not None else torch.ones_like(eps_in)
+        gamma   = module_bn.weight if module_bn is not None else torch.ones_like(eps_in)
+        beta    = module_bn.bias if module_bn is not None else torch.zeros_like(eps_in)
+        eps_out = module_eps_out.eps_in
+        assert torch.all(eps_out == module_activation.scale)
 
-        return super()._apply(g, ap, id_)
+        # compute the requantiser's parameters
+        shape = node_activation.meta['tensor_meta'].shape
+        broadcast_shape = tuple(1 if i != 1 else mi.numel() for i, _ in enumerate(range(0, len(shape))))
+        mi    = mi.reshape(broadcast_shape)
+        sigma = sigma.reshape(broadcast_shape)
+        gamma = gamma.reshape(broadcast_shape)
+        beta  = beta.reshape(broadcast_shape)
+
+        gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels))) * (eps_in * gamma)             / (sigma * eps_out)) # clip to the power of 2 
+        beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))
+        div =(2**round(math.log2(module_activation.n_levels)))  /gamma_int
+        # create the requantiser
+        new_target = id_
+    
+        if module_bn is None: 
+            new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
+            
+        else : 
+            #new_module = AnalogRequantizer() 
+            pass
+        
+        # add the requantiser to the graph...
+        g.add_submodule(new_target, new_module)
+        with g.graph.inserting_after(node_eps_in):
+            new_node = g.graph.call_module(new_target, args=(node_eps_in,))
+        node_eps_out.replace_input_with(node_activation, new_node)
+
+        module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
+        module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
+
+        # ...and delete the old construct
+        g.delete_submodule(node_activation.target)
+        g.graph.erase_node(node_activation)  # since `node_activation` is a user of `node_bn`, we must delete it first
+        if node_bn is not None:
+            g.delete_submodule(node_bn.target)
+            g.graph.erase_node(node_bn)
+        
+        return g
 
 # create the general-purpose `Requantiser`
 class DianaRequantizer(ComposedEditor):
