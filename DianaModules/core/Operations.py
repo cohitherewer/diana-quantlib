@@ -118,41 +118,41 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         else:
             return 8 
 
-class DIANAReLU(QReLU , DianaBaseOperation): 
-    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False):
-         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
-    def _register_qop(self): #used for autograd functions with non-standard backward gradients 
-        self._qop = _FakeDQuantiser.apply 
+#class DIANAReLU(QReLU , DianaBaseOperation): 
+    #def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False):
+         #super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
+    #def _register_qop(self): #used for autograd functions with non-standard backward gradients 
+        #self._qop = _FakeDQuantiser.apply 
 
-    def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        bw_clip_lo = 2**round(math.log2((abs(self.clip_lo/ (self.scale * self.step))).item())) #quantized clip lo and high
-        bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
-        if self.clip_lo < 0: 
-            bw_clip_lo = -bw_clip_lo +1
-        return self._qop(x, bw_clip_lo,bw_clip_hi, self.step, self.scale)    
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-         return super().map_scales(new_bitwidth, signed, HW_Behaviour)
+    #def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        #bw_clip_lo = 2**round(math.log2((abs(self.clip_lo/ (self.scale * self.step))).item())) #quantized clip lo and high
+        #bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
+        #if self.clip_lo < 0: 
+            #bw_clip_lo = -bw_clip_lo +1
+        #return self._qop(x, bw_clip_lo,bw_clip_hi, self.step, self.scale)    
+    #def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+         #return super().map_scales(new_bitwidth, signed, HW_Behaviour)
     
 
 # Deprecated: not supported by hardware 
-#class DIANAReLU( PACTReLU  , DianaBaseOperation): 
-    #def stop_observing(self):
-        #super().stop_observing() 
-        #self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
-        ## edit the scale
+class DIANAReLU( PACTReLU  , DianaBaseOperation): 
+    def stop_observing(self):
+        super().stop_observing() 
+        self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
+        # edit the scale
 
-    #def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
 
-        #if HW_Behaviour: 
-            #self.redefine_qhparams({'bitwidth' : 7, 'signed': True})
+        if HW_Behaviour: 
+            self.redefine_qhparams({'bitwidth' : 7, 'signed': True})
 
-            ##  clip here and freeze 
-            #self.freeze() 
+            #  clip here and freeze 
+            self.freeze() 
             
 
             
-        #else : 
-            #self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+        else : 
+            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
 
 
 

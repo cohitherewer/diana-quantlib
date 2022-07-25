@@ -5,7 +5,7 @@ from typing import List, OrderedDict, Union
 import torch
 
 from DianaModules.core.operations import DIANAIdentity, DIANALinear, DIANAReLU, IdentityType , DIANAConv2d
-from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
+from quantlib.algorithms.qmodules.qmodules.qmodules import _QActivation, _QModule
 
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.editors.base.editor import Editor
@@ -105,8 +105,8 @@ class DianaF2FQuantiser(ComposedEditor):
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps
             ),# Edit conv layers reLU functionalities 
-            DianaF2FInterposer() 
-
+            DianaF2FInterposer()  , 
+            DianaQuantizerFuser()
         ]) # Add interposer here 
 
 # each conv layer will have a a value indicating if the output is used in activation (ReLU) . if there is then we put a a ReLU activation afterwards. otherwise it's just the identity ( This is done in the interposer )
@@ -170,9 +170,42 @@ class ReLUAbsorber(Rewriter) :
 # Modules to look for DIANAConv2d , DIANALinear , AvgPool2d  
 from torch import  nn 
 
+#region Diana fake to true neural nets 
+
+class DianaF2TConverter(ComposedEditor) : 
+    def __init__(self) : 
+        editors = [
+            
+            QuantLibRetracer(),
+          
+            F2TAnnotator(),
+            EpsTunnelInserter(),
+            DianaLinearOpIntegrizer(), 
+
+            DianaRequantizer(),
+        
+            EpsTunnelConstructSimplifier(),
+            EpsTunnelRemover()
+        ]
+
+        super(DianaF2TConverter, self).__init__(editors)
+
+    def apply(self,
+              g: fx.GraphModule,
+              inputdescription: InputDescriptionSpecType = InputDescription(),
+              *args,
+              **kwargs) -> fx.GraphModule:
+
+        g = self._children_editors[0](g)                    # `QuantLibRetracer`
+        g = self._children_editors[1](g, inputdescription)  # `F2TAnnotator`
+        for editor in self._children_editors[2:]:
+            g = editor(g)
+
+        return g
 
 
-########################### Quantizers interposer ###########################
+#region DianaquantizersInterposer
+
 MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear , nn.AvgPool2d , nn.AdaptiveAvgPool2d]
 
 class DianaOpQuantFinder(Finder):
@@ -219,7 +252,7 @@ class DianaOpQuantApplier(Applier):
         qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_in)
         if (ap.type == 'linear' or ap.type == 'conv') and g.get_submodule(ap.node.target).is_relu_out():
        
-            qpost = DIANAReLU({'bitwidth': 8, 'signed': True}, 'per-array', 'minmax')
+            qpost = DIANAReLU({'bitwidth': 8, 'signed': False}, 'per-array', ('const', {'a': 0.0 ,'b': 6.0}))# upper clip is updated every observation 
         else: 
             qpost = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_out)
         pre_target = id_ 
@@ -260,53 +293,67 @@ class DianaF2FInterposer(ComposedEditor): #insert quantidentities between
         rewriter = Rewriter(name='DianaInterposer', symbolic_trace_fn=quantlib_symbolic_trace,finder= DianaOpQuantFinder(), applier=DianaOpQuantApplier())
         super(DianaF2FInterposer, self).__init__([rewriter ]) 
 
+#endregion 
 
-########################### END ###########################
 
-########################### True Quantization ###########################
 
-class DianaF2TConverter(ComposedEditor) : 
-    def __init__(self) : 
-        editors = [
-            
-            QuantLibRetracer(),
-           # DianaQuantizerFuser() , 
-            F2TAnnotator(),
-            EpsTunnelInserter(),
-            DianaLinearOpIntegrizer(), 
-
-            DianaRequantizer(),
-        
-            EpsTunnelConstructSimplifier(),
-            EpsTunnelRemover()
-        ]
-
-        super(DianaF2TConverter, self).__init__(editors)
-
-    def apply(self,
-              g: fx.GraphModule,
-              inputdescription: InputDescriptionSpecType = InputDescription(),
-              *args,
-              **kwargs) -> fx.GraphModule:
-
-        g = self._children_editors[0](g)                    # `QuantLibRetracer`
-        g = self._children_editors[1](g, inputdescription)  # `F2TAnnotator`
-        for editor in self._children_editors[2:]:
-            g = editor(g)
-
-        return g
 
 #### Fuser ### 
-# there will always be an output quantizer for analog conv . 
+# there will always be an output quantizer for analog conv. #fuse div clips than onlu have 1 out and their bitwidth is the same (scale of 1 of 2nd activations)
 
+class DianaQuantizerFuserFinder(Finder) : 
+    def __init__(self) -> None:
+        super().__init__()
+    def find(self, g: fx.GraphModule) -> List[DianaAps]:
+        aps : List[DianaAps]
+        aps = [] 
+        #name_to_module #get names and modules with activations 
+        # get modules first 
+        names = []
+        for name ,_ in g.named_modules(): 
+            if(issubclass(type(g.get_submodule(name)) , _QActivation)): 
+                names.append(name)
+            
+        for node in g.graph.nodes: 
+            if node.target in names : 
+                users = [ u for u in node.users ] 
+                if len(users) == 1 and users[0].target in names:# and  issubclass(type(g.get_submodule(users[0].target)), _QActivation): 
+                    aps.append(DianaAps('' , node))
+        return aps 
+    def check_aps_commutativity(self, aps: List[ApplicationPoint]) -> bool:
+        return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
+class DianaQuantizerFuserApplier(Applier) : 
+    def __init__(self):
+        super().__init__()
+    def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
+        post_node = [u for u in ap.node.users][0]
+        post_module  = g.get_submodule(post_node.target) 
+        cur_module = g.get_submodule(ap.node.target) 
+        lower_bitwidth = 0 if (min(post_module.n_levels, cur_module.n_levels) == cur_module.n_levels ) else 1
+        if lower_bitwidth == 0 : 
+            #if it's 0 then remove post_node 
+            post_node_users = [u for u in post_node.users ]
+            for p_node in post_node_users: 
+                p_node.replace_input_with(post_node, ap.node)
+            g.delete_submodule(post_node.target)
+            g.graph.erase_node(post_node)
+        else: 
+            predecessors = [p for p in p.all_input_nodes]  # upstream
+            assert len(predecessors)  == 1
+            post_node.replace_input_with(ap.node ,predecessors[0] )
+            g.delete_submodule(ap.node.target)
+            g.graph.erase_node(ap.node)
+        return g 
 #this class is used for fusing activations in true to fake 
 class DianaQuantizerFuser(Rewriter) :
-    pass 
+    def __init__(self):
+        super().__init__("DianaActivationFuser", quantlib_symbolic_trace, DianaQuantizerFuserFinder(), DianaQuantizerFuserApplier())
+     
 
 
 
-########################### Linear Op ###########################
 
+#region LinearOpIntegrizer
 SUPPORTED_LINEAR_FPMODULES = (nn.Linear , nn.Conv2d) 
 
 class DianaLinearOpMatcher(PathGraphMatcher) : 
@@ -400,8 +447,6 @@ di_roles = Roles([
 ])
    
 
-#####################  END ###############
-
 
 class DianaLinearOpIntegrizer(ComposedEditor):   
     def __init__(self):
@@ -417,13 +462,14 @@ class DianaLinearOpIntegrizer(ComposedEditor):
             editors.append(class_())
         super().__init__(editors)
     pass 
-    
+#endregion
+   
+
+
 
 ########################### Mixed Percision Requant ###########################
 
-
-# write your own linear op integriser 
-
+#region Requantizer (requantizer at output of operations)
 
 
 class DianaRequantizerApplier(RequantiserApplier): # this will probably have to be rewritten 
@@ -456,3 +502,6 @@ class DianaRequantizer(ComposedEditor):
             namespace[class_name] = class_   
         super(DianaRequantizer, self).__init__([class_() for class_ in namespace.values()])
 
+#endregion 
+
+#endregion
