@@ -9,7 +9,20 @@ import numpy
          
 
 class SIMDModel:
-
+    '''
+    SIMD allowed sequence of operations:
+    - Partial sum
+    - ReLU + Quant
+    - BN + Quant
+    - Res
+    - Res + ReLU + Quant
+    - Partial sum + BN + ReLU + Quant
+    - BN + ReLU + Quant
+    - BN + Res + ReLU + Quant
+    - BN + Res + ReLU + Quant + Pool
+    - BN + ReLU + Quant + Pool
+    - NOP
+    '''
     @classmethod
     def _bn(cls, layer, in_fmap): # batch norm 
         out_fmap = numpy.zeros(in_fmap.shape)
