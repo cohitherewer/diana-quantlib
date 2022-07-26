@@ -5,6 +5,7 @@ from DianaModules.core.operations import DIANAConv2d
 import DianaModules.core.operations as di
 import DianaModules.utils.BaseModules as bm
 from DianaModules.utils.DigitalRequant import DigitalRequantizer
+from quantlib.editing.editing.editors.retracers import QuantLibRetracer
 
 from quantlib.editing.editing.tests import ILSVRC12, common 
 import quantlib.editing.graphs as qg
@@ -81,11 +82,16 @@ class digital_core_test(nn.Module): # problem with conv of first
         print(out_2.shape)
         return  out_1+ out_2
         
-  
+
 
 test_modules = digital_core_test()
+
+from quantlib.editing.graphs.fx import quantlib_symbolic_trace
+graph = quantlib_symbolic_trace(root=test_modules)
+
 test_mat = torch.rand(3,3 , 20 ,20 )*255
 test_modules(test_mat)
+
 converted_graph = bm.DianaModule.fquantize_model8bit(test_modules) 
 converted_graph.start_observing() 
 
@@ -95,9 +101,8 @@ for i in range(10) :
 converted_graph.stop_observing()
 converted_graph.clip_scales() 
 print ("After fake quantization") 
-for _ , module in enumerate(converted_graph.modules()): 
+for _ , module in  converted_graph.named_modules(): 
     print (_ , type(module))
-
 #converted_graph.map_scales(HW_Behaviour=True)
 # true quant 
 converted_graph.true_quantize()
@@ -107,6 +112,7 @@ test_mat = (torch.rand(1,3,20,20)*255).floor()
 print ("After true quantization") 
 for _ , module in enumerate(converted_graph.modules()): 
     print (_ , type(module))
+ 
     
         
 converted_graph.export_model(test_mat)    

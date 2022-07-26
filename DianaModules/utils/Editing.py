@@ -1,6 +1,7 @@
 
 import itertools
 import math
+from tabnanny import check
 from typing import List, OrderedDict, Union
 
 import torch
@@ -21,7 +22,7 @@ from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
 from quantlib.editing.editing.editors.nnmodules.finder.nnsequential import PathGraphMatcher
 from quantlib.editing.editing.editors.nnmodules.pattern.base.pattern import NNModulePattern
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.candidates import Candidates, NNModuleDescription
-
+from DianaModules.utils.AnalogRequant import AnalogRequantizer
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.factory import generate_named_patterns
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.roles import Roles
 from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
@@ -32,6 +33,7 @@ from quantlib.editing.editing.fake2true.annotation.inputdescription import Input
 from quantlib.editing.editing.fake2true.epstunnels.inserter.rewriter import EpsTunnelInserter
 from quantlib.editing.editing.fake2true.epstunnels.remover.rewriter import EpsTunnelRemover
 from quantlib.editing.editing.fake2true.epstunnels.simplifier.rewriter import EpsTunnelConstructSimplifier
+from quantlib.editing.editing.fake2true.integerisation.linearopintegeriser.finder import LinearOpIntegeriserMatcher
 
 from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import RequantiserMatcher
 from quantlib.editing.editing.float2fake.canonicalisation import F2FCanonicaliser
@@ -40,6 +42,7 @@ from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.retracer
 from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.rewriter import AddTreeHarmoniser
 
 from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.modulewisedescription.modulewisedescription import ModuleWiseDescriptionSpecType
+from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.modulewisedescription.nametomodule.nametomodule import NameToModule
 from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.rewriter import ModuleWiseConverter
 from quantlib.editing.editing.float2fake.quantisation.qdescription.qdescription import QDescriptionSpecType
 
@@ -105,7 +108,7 @@ class DianaF2FQuantiser(ComposedEditor):
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps
             ),# Edit conv layers reLU functionalities 
-             ReLUAbsorber() ,    # edit relu 
+        
             DianaF2FInterposer()  , 
             DianaQuantizerFuser()
         ]) # Add interposer here 
@@ -113,51 +116,6 @@ class DianaF2FQuantiser(ComposedEditor):
 # each conv layer will have a a value indicating if the output is used in activation (ReLU) . if there is then we put a a ReLU activation afterwards. otherwise it's just the identity ( This is done in the interposer )
 #  
 
-class ReLUFinder(Finder) : 
-    def __init__(self) -> None:
-        super().__init__()
-    def find(self, g: fx.GraphModule) -> List[ApplicationPoint]:
-        aps : List[DianaAps]  
-        # name to module 
-        #name to node 
-        aps = []
-        name_to_mod = OrderedDict()
-        for name, module in g.named_modules(): 
-            if (type(module) == nn.ReLU): 
-                name_to_mod[name] = module
-        
-        for node in g.graph.nodes: 
-            if node.target in name_to_mod.keys(): 
-                aps.append(DianaAps('', node)) 
-        return aps
-    def check_aps_commutativity(self, aps: List[ApplicationPoint]) -> bool:
-        return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once
-
-
-class ReLURemover(Applier) : 
-    def __init__(self):
-        super().__init__()
-
-    def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
-
-        node = ap.node
-
-        # the `fx.Node` is functionally equivalent to the identity, so we connect its (unique) input to all the outputs
-        predecessors = [p for p in node.all_input_nodes]  # upstream
-        assert len(predecessors) == 1
-        node.replace_all_uses_with(predecessors[0]) 
-        
-        
-
-        g.delete_submodule(node.target)
-        g.graph.erase_node(node)
-        return g
-
-class ReLUAbsorber(Rewriter) : 
-    def __init__(self):
-        finder = ReLUFinder()
-        applier = ReLURemover()
-        super().__init__("ReLU_Remover", quantlib_symbolic_trace, finder, applier)
 
 
 #region DianaActivationFuser
@@ -182,6 +140,7 @@ class DianaQuantizerFuserFinder(Finder) :
                 users = [ u for u in node.users ] 
                 if len(users) == 1 and users[0].target in names:# and  issubclass(type(g.get_submodule(users[0].target)), _QActivation): 
                     aps.append(DianaAps('' , node))
+        
         return aps 
     def check_aps_commutativity(self, aps: List[ApplicationPoint]) -> bool:
         return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
@@ -201,7 +160,7 @@ class DianaQuantizerFuserApplier(Applier) :
             g.delete_submodule(post_node.target)
             g.graph.erase_node(post_node)
         else: 
-            predecessors = [p for p in p.all_input_nodes]  # upstream
+            predecessors = [p for p in ap.node.all_input_nodes]  # upstream
             assert len(predecessors)  == 1
             post_node.replace_input_with(ap.node ,predecessors[0] )
             g.delete_submodule(ap.node.target)
@@ -230,10 +189,11 @@ class DianaF2TConverter(ComposedEditor) :
           
             F2TAnnotator(),
             EpsTunnelInserter(),
+         
             DianaLinearOpIntegrizer(), 
-
+         
             DianaRequantizer(),
-            QuantLibRetracer(),
+           
             EpsTunnelConstructSimplifier(),
             EpsTunnelRemover()
         ]
@@ -300,18 +260,15 @@ class DianaOpQuantApplier(Applier):
             type_in = IdentityType.AIMC_IN
             type_out = IdentityType.AIMC_OUT
         qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_in)
-        if (ap.type == 'linear' or ap.type == 'conv') and g.get_submodule(ap.node.target).is_relu_out():
-       
-            qpost = DIANAReLU({'bitwidth': 8, 'signed': False}, 'per-array', ('const', {'a': 0.0 ,'b': 6.0}))# upper clip is updated every observation 
-        else: 
-            qpost = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_out)
+        qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'minmax', type_out) if type_out == IdentityType.AIMC_OUT else None
+ 
         pre_target = id_ 
         
         
-        post_target = id_ + f'[{str(self._counter)}]'
+        
 
         g.add_submodule(pre_target ,qpre) 
-        g.add_submodule(post_target, qpost) 
+        
             
         input_node = None
         # get input x of qpre 
@@ -331,11 +288,14 @@ class DianaOpQuantApplier(Applier):
         # `new_node` will itself be a user of `node_pre`. Therefore, we need
         # to determine who these users are before `new_node` becomes one of
         # them.
-        downstream_nodes = list(ap.node.users)
-        with g.graph.inserting_after(ap.node): 
-            post_node = g.graph.call_module(post_target , args=(ap.node,)) 
-        for u in downstream_nodes:
-            u.replace_input_with(ap.node, post_node)
+        if qpost is not None: 
+            post_target = id_ + f'[{str(self._counter)}]'
+            g.add_submodule(post_target, qpost) 
+            downstream_nodes = list(ap.node.users)
+            with g.graph.inserting_after(ap.node): 
+                post_node = g.graph.call_module(post_target , args=(ap.node,)) 
+            for u in downstream_nodes:
+                u.replace_input_with(ap.node, post_node)
         return g 
                 
 class DianaF2FInterposer(ComposedEditor): #insert quantidentities between 
@@ -350,14 +310,6 @@ class DianaF2FInterposer(ComposedEditor): #insert quantidentities between
 
 #region LinearOpIntegrizer
 SUPPORTED_LINEAR_FPMODULES = (nn.Linear , nn.Conv2d) 
-
-class DianaLinearOpMatcher(PathGraphMatcher) : 
-    def __init__(self, pattern: NNModulePattern):
-        super().__init__(pattern)
-        # Despite the fact that `eps_out` is in the "body" of the linear
-        # pattern, we allow for its matched `fx.Node` to have multiple users
-        # since its output is not meant to change after the rewriting.
-        pattern.set_leakable_nodes(pattern.name_to_pattern_node()['eps_out'])
 
 class DianaLinearOpIntegrizerApplier(NNModuleApplier): 
     def __init__(self, pattern: NNModulePattern):
@@ -404,27 +356,39 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
         module_eps_in  = name_to_match_module['eps_in']
         module_linear  = name_to_match_module['linear']
         module_eps_out = name_to_match_module['eps_out']
+        if not issubclass(type(module_linear) , _QModule): 
+            # already edited. node might be returned multiple times due to nn.sequential 
+            return g 
+
 
         # create the integerised linear operation
         new_target = id_
         new_module = DianaLinearOpIntegrizerApplier.create_torch_module(module_linear)
-
+  
         # add the requantised linear operation to the graph...
         g.add_submodule(new_target, new_module)
+        
         with g.graph.inserting_after(node_eps_in):
             new_node = g.graph.call_module(new_target, args=(node_eps_in,))
         node_eps_out.replace_input_with(node_linear, new_node)
-
+       
         module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
         module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
-
-        # ...and delete the old operation
+         # ...and delete the old operation
         g.delete_submodule(node_linear.target)
         g.graph.erase_node(node_linear)
+       
+        name_to_module = NameToModule(g.named_modules())
+        name_to_module[node_linear.target] = new_module
+        path_to_parent, child = NameToModule.split_path_to_target(node_linear.target)
+        setattr(name_to_module[path_to_parent], child, new_module)  # this is needed for nn sequentials 
+        
+        
+
         return g
 
 ##################### DEFINING VARS #########################
-
+checker =( lambda m: True , ) 
 di_roles = Roles([
 
     ('eps_in',  Candidates([
@@ -432,8 +396,8 @@ di_roles = Roles([
     ])),
 
     ('linear', Candidates([
-        ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
-        ('QConv2d', NNModuleDescription(class_=nn.Conv2d , kwargs={'in_channels': 1, 'out_channels': 1, 'kernel_size': 3, 'bias': True}))
+        ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True}, checkers=checker)) , 
+        ('QConv2d', NNModuleDescription(class_=nn.Conv2d , kwargs={'in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}, checkers=checker))
     ])),
 
     ('eps_out', Candidates([
@@ -452,8 +416,8 @@ class DianaLinearOpIntegrizer(ComposedEditor):
         editors : List[Editor]
         editors =[]
         for name, pattern in generate_named_patterns(di_roles, admissible_screenplays):
-            class_name = name + 'Integeriser'
-            class_ = get_rewriter_class(class_name, pattern, DianaLinearOpMatcher, DianaLinearOpIntegrizerApplier)
+            class_name = name + 'DianaIntegeriser'
+            class_ = get_rewriter_class(class_name, pattern, LinearOpIntegeriserMatcher, DianaLinearOpIntegrizerApplier)
             editors.append(class_())
         super().__init__(editors)
     pass 
@@ -485,7 +449,9 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         module_bn         = name_to_match_module['bn'] if 'bn' in name_to_match_module.keys() else None
         module_activation = name_to_match_module['activation']
         module_eps_out    = name_to_match_module['eps_out']
-
+        if(issubclass(type(module_activation), dq.DigitalRequantizer) or isinstance(module_activation, AnalogRequantizer)): 
+            # return same module from nn.sequential 
+            return g
         assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
 
         # extract the parameters required to compute the requantiser's parameters
@@ -530,6 +496,12 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         # ...and delete the old construct
         g.delete_submodule(node_activation.target)
         g.graph.erase_node(node_activation)  # since `node_activation` is a user of `node_bn`, we must delete it first
+        
+        name_to_module = NameToModule(g.named_modules())
+        name_to_module[node_activation.target] = new_module
+        path_to_parent, child = NameToModule.split_path_to_target(node_activation.target)
+        setattr(name_to_module[path_to_parent], child, new_module)  # this is needed for nn sequentials
+
         if node_bn is not None:
             g.delete_submodule(node_bn.target)
             g.graph.erase_node(node_bn)

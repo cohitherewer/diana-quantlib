@@ -54,11 +54,14 @@ class DianaModule: # Base class for all diana models
         return self.forward(*args)
     def modules(self): 
         return self.gmodule.modules()
+    def named_modules(self): 
+        return self.gmodule.named_modules()
     @classmethod 
     def fquantize_model8bit(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
-            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'const','DIANA')), 
-            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'const','DIANA')), # can use per-outchannel here 
+            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8 , 'signed': False} , ('const', {'a': 0.0 ,'b': 6.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
+            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), # can use per-outchannel here 
         )
             
         # `AddTreeHarmoniser` argument
@@ -80,7 +83,7 @@ class DianaModule: # Base class for all diana models
     def true_quantize(self): # integrise model 
         converter = DianaF2TConverter()
         x = torch.rand(3,20,20)
-        self.gmodule = QuantLibRetracer()(converter(self.gmodule, {'x': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 1])}})) 
+        self.gmodule = converter(self.gmodule, {'x': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 1])}})
         self._integrized = True
         pass 
 

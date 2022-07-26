@@ -22,7 +22,7 @@ class AnalogQuantOp(torch.autograd.Function):
         pass
     
     @staticmethod
-    def symbolic(g: torch._C.graph, x: torch._C.Value, div :torch._C.Value , zero : torch._C.Value , n_levels: torch.Tensor ,mul :torch._C.Value , add : torch._C.Value) -> torch._C.Value:
+    def symbolic(g: torch._C.Graph, x: torch._C.Value, div :torch._C.Value , zero : torch._C.Value , n_levels: torch.Tensor ,mul :torch._C.Value , add : torch._C.Value) -> torch._C.Value:
         
         #access graph variables using g.div
         pass
