@@ -60,13 +60,13 @@ class DianaModule: # Base class for all diana models
     def fquantize_model8bit(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8 , 'signed': False} , ('const', {'a': 0.0 ,'b': 6.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8 , 'signed': False} , ('const', {'a': 0.0 ,'b': 255.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
             ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), # can use per-outchannel here 
         )
             
         # `AddTreeHarmoniser` argument
         addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'const', 'DIANA')
-        addtreeforceoutputeps = False # set to false because each module quantizes the input differently 
+        addtreeforceoutputeps = True # set to false because each module quantizes the input differently 
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
         converter  =  DianaF2FConverter(
@@ -75,7 +75,7 @@ class DianaModule: # Base class for all diana models
             addtreeforceoutputeps
          )
       
-        converted_graph =QuantLibRetracer()(converter(graph) )
+        converted_graph =converter(graph) 
         
         return DianaModule(converted_graph)
          

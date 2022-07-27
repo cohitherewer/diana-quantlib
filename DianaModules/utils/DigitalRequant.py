@@ -9,13 +9,13 @@ class DigitalRequantizer(Requantisation): # div and clip operations # neeed to i
         # scale and clipping range 
         nn.Module.__init__(self)
         self.register_buffer("div", scale) # scale 
-        self.register_buffer("zero", zero)
+        self.register_buffer("clip_lo", zero)
         self.register_buffer("clip_hi", n_levels-1)
 
         self.qop = DigitalQuantOp.apply
         
     def forward(self , x : torch.Tensor) -> torch.Tensor: 
-        return self.qop(x, self.div,self.zero, self.clip_hi) 
+        return self.qop(x, self.div,self.clip_lo, self.clip_hi) 
      
 # to ensure correct format in onnx file 
 class DigitalQuantOp(torch.autograd.Function):
