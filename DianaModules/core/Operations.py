@@ -118,6 +118,8 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         else:
             return 8 
 
+
+
 class DIANAReLU( PACTReLU  , DianaBaseOperation): 
     def stop_observing(self):
         super().stop_observing() 
@@ -128,7 +130,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
 
         if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 7, 'signed': True})
+            self.redefine_qhparams({'bitwidth' : 8, 'signed': False})
 
             #  clip here and freeze 
             self.freeze() 

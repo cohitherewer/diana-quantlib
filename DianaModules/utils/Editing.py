@@ -103,19 +103,23 @@ class DianaF2FQuantiser(ComposedEditor):
             ModuleWiseConverter(modulewisedescriptionspec),
        
            
+            
+        
+            DianaF2FInterposer()  , 
+            DianaQuantizerFuser() , 
             QuantLibHarmonisedAddRetracer(),
             AddTreeHarmoniser(
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps
-            ),# Edit conv layers reLU functionalities 
-        
-            DianaF2FInterposer()  , 
-            DianaQuantizerFuser()
+            ),
         ]) # Add interposer here 
 
 # each conv layer will have a a value indicating if the output is used in activation (ReLU) . if there is then we put a a ReLU activation afterwards. otherwise it's just the identity ( This is done in the interposer )
-#  
 
+
+#region FakeBatchNormsInsertion 
+
+#endregion 
 
 
 #region DianaActivationFuser
@@ -173,16 +177,13 @@ class DianaQuantizerFuser(Rewriter) :
      
 #endregion
 
-
-# TRUE INTEGRISATION 
-
 # Modules to look for DIANAConv2d , DIANALinear , AvgPool2d  
-from torch import  nn 
+from torch import  Tensor, nn 
 
 #region Diana fake to true neural nets 
 
 class DianaF2TConverter(ComposedEditor) : 
-    def __init__(self) : 
+    def __init__(self, custom_editor : List[Editor] = []) : 
         editors = [
             
             QuantLibRetracer(),
@@ -192,13 +193,14 @@ class DianaF2TConverter(ComposedEditor) :
          
             DianaLinearOpIntegrizer(), 
          
-            DianaRequantizer(),
-           
+            DianaRequantizer()]
+        
+        editor_post = [   
             EpsTunnelConstructSimplifier(),
             EpsTunnelRemover()
         ]
 
-        super(DianaF2TConverter, self).__init__(editors)
+        super(DianaF2TConverter, self).__init__(editors + custom_editor + editor_post)
 
     def apply(self,
               g: fx.GraphModule,
@@ -216,7 +218,7 @@ class DianaF2TConverter(ComposedEditor) :
 
 #region DianaquantizersInterposer
 
-MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear , nn.AvgPool2d , nn.AdaptiveAvgPool2d]
+MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear ,nn.AvgPool2d , nn.AdaptiveAvgPool2d]
 
 class DianaOpQuantFinder(Finder):
 
@@ -258,7 +260,7 @@ class DianaOpQuantApplier(Applier):
         type_out = IdentityType.default
         if ap.type == 'conv' and g.get_submodule(ap.node.target).is_analog: 
             type_in = IdentityType.AIMC_IN
-            type_out = IdentityType.AIMC_OUT
+            type_out = IdentityType.AIMC_OUT #uncomment later when using analog core 
         qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_in)
         qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'minmax', type_out) if type_out == IdentityType.AIMC_OUT else None
  
@@ -272,6 +274,7 @@ class DianaOpQuantApplier(Applier):
             
         input_node = None
         # get input x of qpre 
+        
         if len(ap.node.all_input_nodes) ==1: 
             input_node = ap.node.all_input_nodes[0]
         
@@ -279,7 +282,7 @@ class DianaOpQuantApplier(Applier):
             raise ValueError
         with g.graph.inserting_before(ap.node): 
             pre_node = g.graph.call_module(pre_target, args=(input_node,))
-            ap.node.replace_input_with(input_node , pre_node)
+        ap.node.replace_input_with(input_node , pre_node)
         # Now put quantizer after 
 
          # add the quantiser to the graph (interposing it between the two linear nodes)
@@ -336,8 +339,11 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
                                 dilation=qlinear.dilation,
                                 groups=qlinear.groups,
                                 bias=(qlinear.bias is not None))
+        
         else:
             raise RuntimeError
+        new_module.register_buffer("is_analog" , torch.Tensor([qlinear.bias is not None]) ) # register buffer inside new_module to annotate the model correctly in the onnx export stage 
+ 
         iweight = torch.round(qlinear.qweight.data.clone().detach() / qlinear.scale.data.clone().detach())  # integerised parameters
         new_module.weight.data = iweight
         if qlinear.bias is not None: 
@@ -472,8 +478,11 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         beta  = beta.reshape(broadcast_shape)
 
         gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels))) * (eps_in * gamma)             / (sigma * eps_out)) # clip to the power of 2 
+        if gamma_int == torch.Tensor([0]) : 
+            # epsilon cannot be quantized with current bitwidth. Something wrong in training phase 
+            raise ValueError
         beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))
-        div =(2**round(math.log2(module_activation.n_levels)))  /gamma_int
+        div =(2**round(math.log2(module_activation.n_levels)))  / gamma_int
         # create the requantiser
         new_target = id_
     
@@ -481,7 +490,9 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
             
         else : 
+            #new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)# as a test remove this later 
             #new_module = AnalogRequantizer() 
+            raise ValueError
             pass
         
         # add the requantiser to the graph...
@@ -505,7 +516,8 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         if node_bn is not None:
             g.delete_submodule(node_bn.target)
             g.graph.erase_node(node_bn)
-        
+            #path_to_parent, child = NameToModule.split_path_to_target(node_bn.target)
+            #delattr(name_to_module[path_to_parent], child)
         return g
 
 # create the general-purpose `Requantiser`
@@ -521,4 +533,15 @@ class DianaRequantizer(ComposedEditor):
 
 #endregion 
 
+#region RequantizerSimplifier
+class DianaRequantizerSimplifierFinder(Finder): 
+    pass 
+class DianaRequantizerSimplifierApplier(Applier): 
+    pass 
+class DianaRequantizerSimplifier(Rewriter): 
+
+    pass 
+
 #endregion
+
+

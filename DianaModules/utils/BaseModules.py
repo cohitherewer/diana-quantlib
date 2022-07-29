@@ -1,13 +1,16 @@
 #Abstract class which all diana specific module have to inhereit from 
 from abc import abstractmethod
 from math import log2, floor
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Union
 
-import matplotlib as plt 
+import matplotlib as plt
+from numpy import isin 
 
 from DianaModules.core.operations import DianaBaseOperation
 from DianaModules.utils.onnx import DianaExporter
+from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
+from quantlib.editing.graphs.nn.harmonisedadd import HarmonisedAdd
 from .Editing import DianaF2FConverter, DianaF2TConverter
 
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
@@ -24,16 +27,17 @@ class DianaModule: # Base class for all diana models
     def __init__(self,graph_module: fx.graph_module.GraphModule): 
         self.gmodule = graph_module
         self._integrized = False 
-       
+        self.train_dataset = {} 
+        self.validate_dataset = {}
     def start_observing(self): #before starting training with FP 
-        for _ ,module in enumerate(self.gmodule.modules()):
-            if issubclass(type(module), _QModule) or (issubclass(type(module),DianaModule) and self is not module) : 
-                
+        for _ ,module in self.gmodule.named_modules():
+            if isinstance(module,( _QModule,HarmonisedAdd)) : 
+               
                 module.start_observing()
 
     def stop_observing(self): # before starting training with fake quantised network  
-        for _ ,module in enumerate(self.gmodule.modules()):
-            if issubclass(type(module), _QModule) or (issubclass(type(module),DianaModule) and self is not module) : 
+        for _ ,module in self.gmodule.named_modules():
+            if isinstance(module,_QModule) : 
                 module.stop_observing()
                  
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): # before mapping scale and retraining # TODO change from new_bitwdith and signed to list of qrangespecs or an arbitary number of kwqrgs  
@@ -59,35 +63,37 @@ class DianaModule: # Base class for all diana models
     @classmethod 
     def fquantize_model8bit(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
-            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8 , 'signed': False} , ('const', {'a': 0.0 ,'b': 255.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
-            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), # can use per-outchannel here 
+            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8 , 'signed': False} , ('const', {'a': 0.0 ,'b': 10.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
+            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel here 
         )
             
         # `AddTreeHarmoniser` argument
-        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'const', 'DIANA')
-        addtreeforceoutputeps = True # set to false because each module quantizes the input differently 
+        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA')
+        addtreeforceoutputeps =  False # set to false because each module quantizes the input differently 
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
         converter  =  DianaF2FConverter(
             modulewisedescriptionspec,
             addtreeqdescriptionspec,
             addtreeforceoutputeps
-         )
+        )
       
         converted_graph =converter(graph) 
         
         return DianaModule(converted_graph)
          
 
-    def true_quantize(self): # integrise model 
-        converter = DianaF2TConverter()
-        x = torch.rand(3,20,20)
-        self.gmodule = converter(self.gmodule, {'x': {'shape': x.unsqueeze(0).shape, 'scale':torch.tensor([ 1])}})
+    def true_quantize(self, custom_editors : List[Editor]=[]): # integrise model 
+        converter = DianaF2TConverter(custom_editor=custom_editors)
+        x, _ = self.train_dataset['dataset'].__getitem__(0)
+        if len(x.shape) == 3 : 
+            x = x.unsqueeze(0)
+        self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataset['scale']}})
         self._integrized = True
         pass 
 
-    def export_model(self, x : torch.Tensor): # x is an integrised tensor input is needed for validation in dory graph 
+    def export_model(self): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
             raise NotImplementedError
 
@@ -95,7 +101,10 @@ class DianaModule: # Base class for all diana models
         from pathlib import Path
        
         data_folder = Path("backend/test")
-
+        x, _ = self.train_dataset['dataset'].__getitem__(0)
+        if len(x.shape) == 3 : 
+            x = x.unsqueeze(0)
+        x = (x / self.train_dataset['scale'] ). floor() #integrize 
         exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder.absolute())
         exporter.dump_features(network=self.gmodule, x=x, path=data_folder.absolute() ) 
         pass 
@@ -111,8 +120,18 @@ class DianaModule: # Base class for all diana models
         plot2.plot(metrics['train']['acc'], label='train acc')
         plot2.plot(metrics['validate']['acc'], label='val acc')
         plot2.legend()
-    pass
+    
 
+    def attach_train_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])): 
+
+         
+        self.train_dataset['scale'] = scale 
+        self.train_dataset['dataset'] = dataset
+
+    def attach_validation_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])): 
+        self.validate_dataset['scale'] = scale 
+        self.validate_dataset['dataset'] = dataset
+        
     @classmethod
     def train(model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None): 
         metrics = {}
@@ -152,7 +171,7 @@ class DianaModule: # Base class for all diana models
         return metrics  
 
     def train_model  (self, optimizer,train_dataset: ds, validation_dataset: ds , criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
-        
+        # TODO  rewrite this 
         data_loader = {'train': ut.DataLoader(train_dataset, batch_size=batch_size) , 'validate' : ut.DataLoader(validation_dataset, batch_size=floor(batch_size/len(train_dataset) * len(validation_dataset)))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
         self.start_observing()
