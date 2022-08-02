@@ -123,8 +123,9 @@ test_model = dcore_network()
 
 
 dataset = ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+
 scale = 1/256
-test_indices = list(range(0, 100))
+test_indices = list(range(0, 1000))
 
 
 converted_graph = bm.DianaModule.fquantize_model8bit(test_model) 

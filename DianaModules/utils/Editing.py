@@ -352,7 +352,8 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
         iweight = torch.round(qlinear.qweight.data.clone().detach() / qlinear.scale.data.clone().detach())  # integerised parameters
         new_module.weight.data = iweight
         if qlinear.bias is not None: 
-            new_module.bias.data = qlinear.bias.data.clone().detach() # we don't want to detach the original tensor 
+            new_module.bias.data = qlinear.bias.data.clone().detach().round() # we don't want to detach the original tensor + integrization 
+            new_module.bias.type(torch.int32)
         
         return new_module 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
@@ -484,13 +485,13 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
 
         gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels))) * (eps_in * gamma)             / (sigma * eps_out)) # clip to the power of 2 
         if gamma_int == torch.Tensor([0]) : 
-            # epsilon cannot be quantized with current bitwidth. Something wrong in training phase 
-            print()#raise ValueError
+            raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
+  
         beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))
         div =(2**round(math.log2(module_activation.n_levels)))  / gamma_int
         # create the requantiser
         new_target = id_
-    
+
         if module_bn is None: 
             new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
             
@@ -498,7 +499,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             #new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)# as a test remove this later 
             #new_module = AnalogRequantizer() 
             raise ValueError
-            pass
+            
         
         # add the requantiser to the graph...
         g.add_submodule(new_target, new_module)
