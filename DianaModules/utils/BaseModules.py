@@ -64,12 +64,12 @@ class DianaModule: # Base class for all diana models
     def fquantize_model8bit(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'const','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8 , 'signed': False} , ('const', {'a': 0.0 ,'b': 6.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7 , 'signed': False} , ('const', {'a': 0.0 ,'b': 3.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
             ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'const','DIANA')), # can use per-outchannel here 
         )
             
         # `AddTreeHarmoniser` argument
-        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'const', 'DIANA')
+        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'minmax', 'DIANA')
         addtreeforceoutputeps =  False # set to false because each module quantizes the input differently 
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 

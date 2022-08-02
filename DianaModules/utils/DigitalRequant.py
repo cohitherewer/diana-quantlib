@@ -10,7 +10,7 @@ class DigitalRequantizer(Requantisation): # div and clip operations # neeed to i
         nn.Module.__init__(self)
         self.register_buffer("div", scale) # scale 
         self.register_buffer("clip_lo", zero)
-        self.register_buffer("clip_hi", n_levels-1)
+        self.register_buffer("clip_hi", n_levels-1 - zero)
 
         self.qop = DigitalQuantOp.apply
         
