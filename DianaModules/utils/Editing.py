@@ -6,7 +6,7 @@ from typing import List, OrderedDict, Union
 
 import torch
 
-from DianaModules.core.operations import DIANAIdentity, DIANALinear, DIANAReLU, IdentityType , DIANAConv2d
+from DianaModules.core.Operations import DIANAIdentity, DIANALinear, DIANAReLU, IdentityType , DIANAConv2d
 import DianaModules.utils.DigitalRequant as dq
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QActivation, _QModule
 
@@ -484,7 +484,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         beta  = beta.reshape(broadcast_shape)
 
         gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels))) * (eps_in * gamma)             / (sigma * eps_out)) # clip to the power of 2 
-        if gamma_int == torch.Tensor([0]) : 
+        if gamma_int == torch.Tensor([0]) :  # truncation 
             raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
   
         beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))

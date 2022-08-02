@@ -2,8 +2,9 @@ from lib2to3.pytree import convert
 from turtle import down, forward
 import torch
 from torch import nn
-from DianaModules.core.operations import DIANAConv2d, DIANAIdentity
-import DianaModules.core.operations as di
+from DianaModules.core.Operations import DIANAConv2d, DIANAIdentity
+import DianaModules.core.Operations as di
+from DianaModules.core.Operations import DIANAReLU
 import DianaModules.utils.BaseModules as bm
 from DianaModules.utils.DigitalRequant import DigitalRequantizer
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -103,16 +104,8 @@ class dcore_network(nn.Module):
             DBlock(64, 64)
         ,
 
-            DBlock(64, 128, downsample=True),
-            DBlock(128, 128)
-        ,
-
-            DBlock(128, 256, downsample=True),
-            DBlock(256, 256)
-        , 
-            DBlock(256, 512, downsample=True),
-            DBlock(512, 512)
-        )
+            DBlock(64, 128, downsample=True)
+            )
     def forward(self, x: torch.Tensor) : 
         out1 = self.layer_0(x)
         return self.resblock_layers(out1) 
@@ -125,10 +118,10 @@ test_model = dcore_network()
 dataset = ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
 
 scale = 1/256
-test_indices = list(range(0, 1000))
+test_indices = list(range(0, 100))
 
 
-converted_graph = bm.DianaModule.fquantize_model8bit(test_model) 
+converted_graph = bm.DianaModule.from_trained_fp_model(test_model) 
 
 
 converted_graph.start_observing() 
@@ -140,10 +133,21 @@ for i in  test_indices :
 
 
 converted_graph.stop_observing() 
-converted_graph.clip_scales() 
+
+t_indices = list(range(101, 300)) # for learning upper clipping  of relu 
+for i in  test_indices :
+    x = dataset.__getitem__(i)[0].unsqueeze(0) 
+    _ = converted_graph(x) 
+
+
 print ("After fake quantization") 
+
 for _ , module in  converted_graph.named_modules(): 
-    print (_ , type(module))
+    if type(module)  == DIANAReLU: 
+        print(module.clip_hi) 
+        module.freeze() 
+
+converted_graph.clip_scales() 
 #converted_graph.map_scales(HW_Behaviour=True)
 # true quant 
 converted_graph.attach_train_dataset(dataset , torch.Tensor([scale]))

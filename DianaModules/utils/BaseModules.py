@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Union
 import matplotlib as plt
 from numpy import isin 
 
-from DianaModules.core.operations import DianaBaseOperation
+from DianaModules.core.Operations import DianaBaseOperation
 from DianaModules.utils.onnx import DianaExporter
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -24,11 +24,11 @@ import torch.utils.data as ut
 from  torch.utils.data import Dataset as ds  
 
 class DianaModule: # Base class for all diana models  
-    def __init__(self,graph_module: fx.graph_module.GraphModule): 
+    def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
         self.gmodule = graph_module
         self._integrized = False 
         self.train_dataset = {} 
-        self.validate_dataset = {}
+        self.validation_dataset = {}
     def start_observing(self): #before starting training with FP 
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,( _QModule,HarmonisedAdd)) : 
@@ -60,11 +60,12 @@ class DianaModule: # Base class for all diana models
         return self.gmodule.modules()
     def named_modules(self): 
         return self.gmodule.named_modules()
+    
     @classmethod 
-    def fquantize_model8bit(cls, model: nn.Module): # from_ floating point quantised model 
+    def from_trained_fp_model(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7 , 'signed': False} , ('const', {'a': 0.0 ,'b': 6.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7 , 'signed': False} , ('const', {'a': 0.0 ,'b': 10.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
             ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel here 
         )
             
@@ -127,13 +128,15 @@ class DianaModule: # Base class for all diana models
          
         self.train_dataset['scale'] = scale 
         self.train_dataset['dataset'] = dataset
+        self.train_dataset['size'] = len(dataset)
 
     def attach_validation_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])): 
-        self.validate_dataset['scale'] = scale 
-        self.validate_dataset['dataset'] = dataset
+        self.validation_dataset['scale'] = scale 
+        self.validation_dataset['dataset'] = dataset
+        self.validation_dataset['size'] = len(dataset ) 
         
     @classmethod
-    def train(model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None): 
+    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None): 
         metrics = {}
      
         assert (model and optimizer) 
@@ -170,11 +173,12 @@ class DianaModule: # Base class for all diana models
             metrics[stage]['acc'].append(e_acc)
         return metrics  
 
-    def train_model  (self, optimizer,train_dataset: ds, validation_dataset: ds , criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
         # TODO  rewrite this 
-        data_loader = {'train': ut.DataLoader(train_dataset, batch_size=batch_size) , 'validate' : ut.DataLoader(validation_dataset, batch_size=floor(batch_size/len(train_dataset) * len(validation_dataset)))}
+        data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
         self.start_observing()
+        optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9)  
         FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
         DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
