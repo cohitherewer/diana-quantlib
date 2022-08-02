@@ -106,12 +106,15 @@ class DianaF2FQuantiser(ComposedEditor):
             
         
             DianaF2FInterposer()  , 
-            DianaQuantizerFuser() , 
+            
             QuantLibHarmonisedAddRetracer(),
             AddTreeHarmoniser(
                 addtreeqdescriptionspec,
                 addtreeforceoutputeps
             ),
+            QuantLibRetracer(), 
+            DianaQuantizerFuser() ,# ignore the harmonise adds 
+           
         ]) # Add interposer here 
 
 # each conv layer will have a a value indicating if the output is used in activation (ReLU) . if there is then we put a a ReLU activation afterwards. otherwise it's just the identity ( This is done in the interposer )
@@ -218,7 +221,7 @@ class DianaF2TConverter(ComposedEditor) :
 
 #region DianaquantizersInterposer
 
-MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear ,nn.AvgPool2d , nn.AdaptiveAvgPool2d]
+MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear]# ,nn.AvgPool2d , nn.AdaptiveAvgPool2d]
 
 class DianaOpQuantFinder(Finder):
 
@@ -231,8 +234,7 @@ class DianaOpQuantFinder(Finder):
                 return 'conv' 
             elif type(module) == DIANALinear: 
                 return 'linear'
-            elif type(module) == nn.AvgPool2d or type(module) == nn.AdaptiveAvgPool2d: 
-                return 'pool'
+            
             return ''
      
         aps: List[DianaAps] = []
@@ -480,7 +482,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels))) * (eps_in * gamma)             / (sigma * eps_out)) # clip to the power of 2 
         if gamma_int == torch.Tensor([0]) : 
             # epsilon cannot be quantized with current bitwidth. Something wrong in training phase 
-            raise ValueError
+            print()#raise ValueError
         beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))
         div =(2**round(math.log2(module_activation.n_levels)))  / gamma_int
         # create the requantiser
