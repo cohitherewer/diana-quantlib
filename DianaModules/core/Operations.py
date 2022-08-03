@@ -124,7 +124,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     def stop_observing(self):
         super().stop_observing() 
         self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
-        #self.freeze()
+        self.freeze()
         # edit the scale
 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):

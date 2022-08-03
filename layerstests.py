@@ -4,7 +4,6 @@ import torch
 from torch import nn
 from DianaModules.core.Operations import DIANAConv2d, DIANAIdentity
 import DianaModules.core.Operations as di
-from DianaModules.core.Operations import DIANAReLU
 import DianaModules.utils.BaseModules as bm
 from DianaModules.utils.DigitalRequant import DigitalRequantizer
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -98,13 +97,13 @@ class   DBlock(nn.Module):
 class dcore_network(nn.Module): 
     def __init__(self) -> None:
         super().__init__()
-        self.layer_0 =  nn.Sequential(nn.Conv2d(in_channels=3,out_channels=64,kernel_size=3, stride=1, padding=1 ) ,nn.ReLU())
+        self.layer_0 =  nn.Sequential(nn.Conv2d(in_channels=3,out_channels=10,kernel_size=3, stride=1, padding=1 ) ,nn.ReLU())
         self.resblock_layers = nn.Sequential(
-            DBlock(64, 64),
-            DBlock(64, 64)
+            DBlock(10, 10),
+            DBlock(10, 15 , downsample=True)
         ,
 
-            DBlock(64, 128, downsample=True)
+            DBlock(15, 15, downsample=True)
             )
     def forward(self, x: torch.Tensor) : 
         out1 = self.layer_0(x)
@@ -134,20 +133,13 @@ for i in  test_indices :
 
 converted_graph.stop_observing() 
 
-t_indices = list(range(101, 300)) # for learning upper clipping  of relu 
-for i in  test_indices :
-    x = dataset.__getitem__(i)[0].unsqueeze(0) 
-    _ = converted_graph(x) 
+converted_graph.clip_scales() 
 
 
 print ("After fake quantization") 
 
 for _ , module in  converted_graph.named_modules(): 
-    if type(module)  == DIANAReLU: 
-        print(module.clip_hi) 
-        module.freeze() 
-
-converted_graph.clip_scales() 
+    print (_ , type(module))
 #converted_graph.map_scales(HW_Behaviour=True)
 # true quant 
 converted_graph.attach_train_dataset(dataset , torch.Tensor([scale]))

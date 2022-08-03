@@ -65,8 +65,8 @@ class DianaModule: # Base class for all diana models
     def from_trained_fp_model(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7 , 'signed': False} , ('const', {'a': 0.0 ,'b': 10.0}) , 'DIANA')), # upper clip is updated every observation  , ) )
-            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel here 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7 , 'signed': False} , ('const', {'a': 0.0 ,'b': 2}) , 'DIANA')), # upper clip is updated every observation  , ) )
+            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'const','DIANA')), # can use per-outchannel here 
         )
             
         # `AddTreeHarmoniser` argument

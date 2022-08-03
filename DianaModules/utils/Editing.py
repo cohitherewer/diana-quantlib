@@ -163,18 +163,24 @@ class DianaQuantizerFuserApplier(Applier) :
         if lower_bitwidth == 0 : 
             #if it's 0 then remove cur node 
             cur_node_users = [u for u in ap.node.users ]
+
             for p_node in cur_node_users: 
                 p_node.replace_input_with(ap.node, pre_node)
+            pre_module.clip_lo = max(pre_module.clip_lo , cur_module.clip_lo)
+            pre_module.clip_hi = min(pre_module.clip_hi , cur_module.clip_hi)
             g.delete_submodule(ap.node.target)
             g.graph.erase_node(ap.node)
-           
+            # Edit clipping of pre_node        
         else: 
             pre_node_users = [p for p in pre_node.users]  # upstream
             if len(pre_node_users)  == 1:  # make sure pre node only has 1 user
                 for user in pre_node_users:  #without ap.node
                     user.replace_input_with(pre_node, ap.node)
+                cur_module.clip_lo = max(pre_module.clip_lo , cur_module.clip_lo)
+                cur_module.clip_hi = min(pre_module.clip_hi , cur_module.clip_hi)
                 g.delete_submodule(pre_node.target)
                 g.graph.erase_node(pre_node)
+        
         return g 
 #this class is used for fusing activations in true to fake 
 class DianaQuantizerFuser(Rewriter) :
