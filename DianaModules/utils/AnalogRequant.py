@@ -5,7 +5,7 @@ from torch import nn
 from quantlib.editing.graphs.nn.requant import Requantisation 
 
 class AnalogRequantizer(Requantisation): # # neeed to inhereit from requantisation for tracing and traversal of quantlib 
-    def __init__(self,scale : torch.Tensor , zero : torch.Tensor , n_levels : torch.Tensor, mul : torch.Tensor, add : torch.Tesnor ) -> None:
+    def __init__(self,scale : torch.Tensor , zero : torch.Tensor , n_levels : torch.Tensor, mul : torch.Tensor, add : torch.Tensor ) -> None:
         # scale and clipping range 
         super().__init__() 
         self.register_buffer("div", scale ) # scale 
