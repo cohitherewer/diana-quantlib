@@ -46,7 +46,8 @@ class DianaAnnotator(ONNXAnnotator) :
                     annotations.append(onnx.helper.make_attribute(key='weight_bits', value=weight_bits))
                     annotations.append(onnx.helper.make_attribute(key='bias_bits',   value=bias_bits))
                     if isinstance(pytorch_module, nn.Conv2d): 
-                        annotations.append(onnx.helper.make_attribute(key='layout', value ='OIHW'))
+                        annotations.append(onnx.helper.make_attribute(key='weight_data_layout', value ='OIHW'))
+                        annotations.append(onnx.helper.make_attribute(key='input_data_layout' , value = 'NCHW')) 
 
             elif op_type in dory_onnxnode_op_types['mul']: # only for analog core. still don't have specs 
                 mul_bits = self._requantisation_bits

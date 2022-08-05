@@ -8,7 +8,7 @@ repository for the training framework of diana
   - **Iteration 1**: As regularly done, the torch floating-point Model is trained 
   - **Iteration 2**: Model is fake-quantized to 8-bits and a graph of the model is generated. The model is then re-trained to regain the lost accuracy 
   - **Iteration 3**: Model is re-quantized to diana specific parameters using **map_scale**. For example, the weights of a convolution in the analog core are mapped to terneray. After the mapping, the model is retrained again. 
-  - **Iteration 4**: Scales are clipped to the closest power of 2 and model is retrained. 
+  - **Iteration 4**: Scales are clipped to the closest power of 2, non-ideal analog core behaviour enabled(TBD) and model is retrained. 
 - ## Graph Generation 
     After training is done, the fake-quantized model is integrized ([check true-quantization section for more info](#true-quantization) 
 ) and an ONNX model is generated and exported with the DORY-specific annotations 
