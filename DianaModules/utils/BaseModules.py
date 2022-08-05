@@ -142,8 +142,8 @@ class DianaModule: # Base class for all diana models
       
     @classmethod
     def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None  ): 
-        metrics = {}
-     
+        metrics = {'train': {'loss': [], 'acc': []} , 'validate': {'loss': [], 'acc': []} }
+        
         assert (model and optimizer) 
         for e in range(epochs):     
             for stage in ['train', 'validate']: 
@@ -173,10 +173,10 @@ class DianaModule: # Base class for all diana models
                 e_loss = running_loss / len(data_loader[stage].dataset)
                 e_acc = running_correct / len(data_loader[stage].dataset)
                 print(f'Epoch {e+1} \t\t {stage}ing... Loss: {e_loss} Accuracy :{e_acc}')
-            if stage == 'train' and scheduler is not None: 
-                scheduler.step()
-            metrics[stage]['loss'].append(e_loss)
-            metrics[stage]['acc'].append(e_acc)
+                if stage == 'train' and scheduler is not None: 
+                    scheduler.step()
+                metrics[stage]['loss'].append(e_loss)
+                metrics[stage]['acc'].append(e_acc)
         return metrics  
 
     def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 , output_weights_path : Union[str ,None] = None ): 
@@ -189,7 +189,7 @@ class DianaModule: # Base class for all diana models
         if output_weights_path is not None : 
             out_path = output_weights_path + self.gmodule._get_name()+'_FPweights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
-        DianaModule.plot_training_metrics(FP_metrics) 
+        #DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.start_observing()
         # put 100 validation data sample through and initialize quantization hyperparameters 
@@ -207,14 +207,14 @@ class DianaModule: # Base class for all diana models
         if output_weights_path is not None : 
             out_path = output_weights_path + self.gmodule._get_name()+'_FQ8weights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
-        DianaModule.plot_metrics(q8b_metrics ) 
+        #DianaModule.plot_metrics(q8b_metrics ) 
         #Iteration 3 - Input HW specific quantisation, map scales 
         self.map_scales(HW_behaviour=True) 
         qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
         if output_weights_path is not None : 
             out_path = output_weights_path + self.gmodule._get_name()+'_FQDianaweights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
-        DianaModule.plot_metrics(qHW_metrics) 
+        #DianaModule.plot_metrics(qHW_metrics) 
         #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain and train 
         self.clip_scales() 
         
@@ -222,7 +222,7 @@ class DianaModule: # Base class for all diana models
         if output_weights_path is not None : 
             out_path = output_weights_path + self.gmodule._get_name()+'_FQHWweights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
-        DianaModule.plot_metrics(qSc_metrics ) 
+        #DianaModule.plot_metrics(qSc_metrics ) 
 
 
 # - In the integrised model pass the relu clipping as a scale and then divide by scale in following conv module
