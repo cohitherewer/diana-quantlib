@@ -23,8 +23,11 @@ from torch import optim
 import torch.utils.data as ut 
 from  torch.utils.data import Dataset as ds  
 
+
 class DianaModule: # Base class for all diana models  
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
+     
         self.gmodule = graph_module
         self._integrized = False 
         self.train_dataset = {} 
@@ -62,11 +65,11 @@ class DianaModule: # Base class for all diana models
         return self.gmodule.named_modules()
     
     @classmethod 
-    def from_trained_fp_model(cls, model: nn.Module): # from_ floating point quantised model 
+    def from_fp_model(cls, model: nn.Module): # from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7 , 'signed': False} , ('const', {'a': 0.0 ,'b': 2}) , 'DIANA')), # upper clip is updated every observation  , ) )
-            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'const','DIANA')), # can use per-outchannel here 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} , ('const', {'a': 0.0 ,'b': 200}) , 'DIANA')), # upper clip is updated during training
+            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
         )
             
         # `AddTreeHarmoniser` argument
@@ -134,9 +137,9 @@ class DianaModule: # Base class for all diana models
         self.validation_dataset['scale'] = scale 
         self.validation_dataset['dataset'] = dataset
         self.validation_dataset['size'] = len(dataset ) 
-        
+      
     @classmethod
-    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None): 
+    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None  ): 
         metrics = {}
      
         assert (model and optimizer) 
@@ -149,7 +152,8 @@ class DianaModule: # Base class for all diana models
                 else : 
                     model.eval () 
             
-                for x,y in data_loader[stage]: 
+                for i,data in enumerate(data_loader[stage]): 
+                    x , y = data[0].to(cls.device), data[1].to(cls.device)
                     optimizer.zero_grad() 
                     if stage == 'validate': 
                         with torch.no_grad(): 
@@ -173,29 +177,40 @@ class DianaModule: # Base class for all diana models
             metrics[stage]['acc'].append(e_acc)
         return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 ): 
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 , output_weights_path : Union[str ,None] = None ): 
         # TODO  rewrite this 
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
         self.start_observing()
         optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9)  
         FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+        if output_weights_path is not None : 
+            out_path = output_weights_path + self.gmodule._get_name()+'_FPweights.pth' 
+            torch.save(self.gmodule.state_dict(), out_path)
         DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.stop_observing() 
         q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+        if output_weights_path is not None : 
+            out_path = output_weights_path + self.gmodule._get_name()+'_FQ8weights.pth' 
+            torch.save(self.gmodule.state_dict(), out_path)
         DianaModule.plot_metrics(q8b_metrics ) 
         #Iteration 3 - Input HW specific quantisation, map scales 
         self.map_scales(HW_behaviour=True) 
         qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+        if output_weights_path is not None : 
+            out_path = output_weights_path + self.gmodule._get_name()+'_FQDianaweights.pth' 
+            torch.save(self.gmodule.state_dict(), out_path)
         DianaModule.plot_metrics(qHW_metrics) 
         #Iteration 4 - clip scales to the power of 2 again and train 
         self.clip_scales() 
+        
         qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+        if output_weights_path is not None : 
+            out_path = output_weights_path + self.gmodule._get_name()+'_FQHWweights.pth' 
+            torch.save(self.gmodule.state_dict(), out_path)
         DianaModule.plot_metrics(qSc_metrics ) 
 
-        
-        pass
 
 # - In the integrised model pass the relu clipping as a scale and then divide by scale in following conv module
 # write your own applier that is added in the end to replace first conv layer with digital conv and replace harmonise adds with a correct dianamodule 

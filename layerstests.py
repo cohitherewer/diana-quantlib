@@ -120,7 +120,7 @@ scale = 1/256
 test_indices = list(range(0, 100))
 
 
-converted_graph = bm.DianaModule.from_trained_fp_model(test_model) 
+converted_graph = bm.DianaModule.from_fp_model(test_model) 
 
 
 converted_graph.start_observing() 
