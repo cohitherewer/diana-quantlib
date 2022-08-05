@@ -2,6 +2,7 @@
 #Abstract class which all diana specific module have to inhereit from 
 from abc import abstractmethod
 from math import log2, floor
+from random import randint
 from typing import Any, Dict, List, Union
 
 import matplotlib as plt
@@ -17,7 +18,7 @@ from .Editing import DianaF2FConverter, DianaF2TConverter
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 import torch 
 import torch.fx as fx
-from torch import nn
+from torch import nn, rand
 import quantlib.editing.graphs as qg
 import quantlib.backends as qb 
 from torch import optim 
@@ -182,7 +183,7 @@ class DianaModule: # Base class for all diana models
         # TODO  rewrite this 
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
-        self.start_observing()
+        
         optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9)  
         FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
         if output_weights_path is not None : 
@@ -190,6 +191,17 @@ class DianaModule: # Base class for all diana models
             torch.save(self.gmodule.state_dict(), out_path)
         DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
+        self.start_observing()
+        # put 100 validation data sample through and initialize quantization hyperparameters 
+        
+        for i in range(100): 
+            idx  = randint(0 , self.validation_dataset['size'] -1 )
+            x, _ = self.validation_dataset['dataset'].__getitem__(idx)
+            if len(x.shape) == 3 : 
+                x = x.unsqueeze(0)
+            x = x/self.validation_dataset['scale'] 
+            _ = self.gmodule(x) 
+
         self.stop_observing() 
         q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
         if output_weights_path is not None : 
@@ -203,7 +215,7 @@ class DianaModule: # Base class for all diana models
             out_path = output_weights_path + self.gmodule._get_name()+'_FQDianaweights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
         DianaModule.plot_metrics(qHW_metrics) 
-        #Iteration 4 - clip scales to the power of 2 again and train 
+        #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain and train 
         self.clip_scales() 
         
         qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
