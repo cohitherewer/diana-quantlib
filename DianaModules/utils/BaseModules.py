@@ -107,10 +107,10 @@ class DianaModule: # Base class for all diana models
         from pathlib import Path
        
         data_folder = Path("backend/test")
-        x, _ = self.train_dataset['dataset'].__getitem__(0)
+        x, _ = self.validation_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
-        x = (x / self.train_dataset['scale'] ). floor() #integrize 
+        x = (x / self.validation_dataset['scale'] ). floor() #integrize 
         exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder.absolute())
         exporter.dump_features(network=self.gmodule, x=x, path=data_folder.absolute() ) 
         pass 
@@ -128,9 +128,7 @@ class DianaModule: # Base class for all diana models
         plot2.legend()
     
 
-    def attach_train_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])): 
-
-         
+    def attach_train_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])):        
         self.train_dataset['scale'] = scale 
         self.train_dataset['dataset'] = dataset
         self.train_dataset['size'] = len(dataset)
@@ -179,17 +177,17 @@ class DianaModule: # Base class for all diana models
                 metrics[stage]['acc'].append(e_acc)
         return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 , output_weights_path : Union[str ,None] = None ): 
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
         self.gmodule.to(DianaModule.device)
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
-        
-        optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9)  
-        FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
-        if output_weights_path is not None : 
-            out_path = output_weights_path + self.gmodule._get_name()+'_FPweights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-        #DianaModule.plot_training_metrics(FP_metrics) 
+        if train_FP_model:  
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9)  
+            FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            if output_weights_path is not None : 
+                out_path = output_weights_path + self.gmodule._get_name()+'_FPweights.pth' 
+                torch.save(self.gmodule.state_dict(), out_path)
+            #DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.start_observing()
         # put 100 validation data sample through and initialize quantization hyperparameters 
@@ -203,26 +201,29 @@ class DianaModule: # Base class for all diana models
             _ = self.gmodule(x) 
 
         self.stop_observing() 
-        q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
-        if output_weights_path is not None : 
-            out_path = output_weights_path + self.gmodule._get_name()+'_FQ8weights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-        #DianaModule.plot_metrics(q8b_metrics ) 
+        if train_8bit_model: 
+            q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            if output_weights_path is not None : 
+                out_path = output_weights_path + self.gmodule._get_name()+'_FQ8weights.pth' 
+                torch.save(self.gmodule.state_dict(), out_path)
+            #DianaModule.plot_metrics(q8b_metrics ) 
         #Iteration 3 - Input HW specific quantisation, map scales 
         self.map_scales(HW_behaviour=True) 
-        qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
-        if output_weights_path is not None : 
-            out_path = output_weights_path + self.gmodule._get_name()+'_FQDianaweights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-        #DianaModule.plot_metrics(qHW_metrics) 
-        #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain and train 
+        if train_HWmapped_model:  
+            qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            if output_weights_path is not None : 
+                out_path = output_weights_path + self.gmodule._get_name()+'_FQDianaweights.pth' 
+                torch.save(self.gmodule.state_dict(), out_path)
+            #DianaModule.plot_metrics(qHW_metrics) 
+        #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
         self.clip_scales() 
-        
-        qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
-        if output_weights_path is not None : 
-            out_path = output_weights_path + self.gmodule._get_name()+'_FQHWweights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-        #DianaModule.plot_metrics(qSc_metrics ) 
+        if train_HW_model: 
+            qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            if output_weights_path is not None : 
+                out_path = output_weights_path + self.gmodule._get_name()+'_FQHWweights.pth' 
+                torch.save(self.gmodule.state_dict(), out_path)
+            #DianaModule.plot_metrics(qSc_metrics ) 
+
 
 
 # - In the integrised model pass the relu clipping as a scale and then divide by scale in following conv module

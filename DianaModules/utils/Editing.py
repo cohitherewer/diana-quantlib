@@ -97,16 +97,18 @@ class DianaF2FQuantiser(ComposedEditor):
                  modulewisedescriptionspec:   ModuleWiseDescriptionSpecType,
                  addtreeqdescriptionspec:     QDescriptionSpecType,
                  addtreeforceoutputeps:       bool,
-                 qinterposerqdescriptionspec: Union[QDescriptionSpecType, None] = None):
-        if qinterposerqdescriptionspec == None:
-            super(DianaF2FQuantiser, self).__init__([
+                 ):
+      
+        super(DianaF2FQuantiser, self).__init__([
             QuantLibRetracer(),
+            
             ModuleWiseConverter(modulewisedescriptionspec),
        
            
             
-        
             DianaF2FInterposer()  , 
+        
+            
             
             QuantLibHarmonisedAddRetracer(),
             AddTreeHarmoniser(

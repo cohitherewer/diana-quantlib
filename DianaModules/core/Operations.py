@@ -118,8 +118,6 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         else:
             return 8 
 
-
-
 class DIANAReLU( PACTReLU  , DianaBaseOperation): 
     def stop_observing(self):
         super().stop_observing() 
@@ -139,9 +137,6 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
             
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
-
-
-
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
 class DIANAConv2d(QConv2d , DianaBaseOperation):
     
@@ -194,7 +189,5 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
-
-
 
 
