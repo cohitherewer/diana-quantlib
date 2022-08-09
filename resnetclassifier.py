@@ -19,13 +19,11 @@ model = ResNet18()
 #    print (f'{idx} ---->>>> {module}')
 ##TRAINING
 
-converted = DianaModule.from_fp_model(model ) 
+converted = DianaModule(model)
 converted.attach_train_dataset(train_dataset , train_scale) 
 converted.attach_validation_dataset(validation_dataset, train_scale)
 
-for idx , module in enumerate(converted.modules()): 
-    print (idx , "->" , module)
 
 data_folder = Path("trained_models/resnet18")
-converted.QA_iterative_train(epochs=3 ,output_weights_path= str(data_folder.absolute())) 
+converted.QA_iterative_train(epochs=24, batch_size=256 ,output_weights_path= str(data_folder.absolute())) 
 

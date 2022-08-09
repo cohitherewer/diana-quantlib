@@ -1,6 +1,7 @@
 
 #Abstract class which all diana specific module have to inhereit from 
 from abc import abstractmethod
+from cProfile import run
 from math import log2, floor
 from random import randint
 from typing import Any, Dict, List, Union
@@ -67,7 +68,7 @@ class DianaModule: # Base class for all diana models
         return self.gmodule.named_modules()
     
     @classmethod 
-    def from_fp_model(cls, model: nn.Module): # from_ floating point quantised model 
+    def from_fp_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
             ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} , ('const', {'a': 0.0 ,'b': 200}) , 'DIANA')), # upper clip is updated during training
@@ -87,7 +88,7 @@ class DianaModule: # Base class for all diana models
       
         converted_graph =converter(graph) 
         
-        return DianaModule(converted_graph)
+        return converted_graph
          
 
     def true_quantize(self, custom_editors : List[Editor]=[]): # integrise model 
@@ -146,7 +147,7 @@ class DianaModule: # Base class for all diana models
         for e in range(epochs):     
             for stage in ['train', 'validate']: 
                 running_loss = 0 
-                running_correct = 0 
+                running_correct = []
                 if stage == 'train': 
                     model.train() 
                 else : 
@@ -167,28 +168,32 @@ class DianaModule: # Base class for all diana models
                         optimizer.step() 
           
                     running_loss += loss.item() *x.size(0) 
-                    running_correct += torch.sum(predictions==y.data).item() # for classification problems
+                    running_correct.append(torch.tensor(torch.sum(predictions==y.data).item() / torch.numel(predictions)) ) # for classification problems_
                 e_loss = running_loss / len(data_loader[stage].dataset)
-                e_acc = running_correct / len(data_loader[stage].dataset)
-                print(f'Epoch {e+1} \t\t {stage}ing... Loss: {e_loss} Accuracy :{e_acc}')
+                e_acc = torch.vstack(running_correct).mean()
+                print(f'Epoch {e+1} \t\t {stage} stage... Loss: {e_loss:.4f} Accuracy :{e_acc:.4f}')
                 if stage == 'train' and scheduler is not None: 
                     scheduler.step()
                 metrics[stage]['loss'].append(e_loss)
                 metrics[stage]['acc'].append(e_acc)
         return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 1000 , batch_size = 64 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 64 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
         self.gmodule.to(DianaModule.device)
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
+
+        optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9, weight_decay=1e-4)  
         if train_FP_model:  
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9)  
+            
             FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 
                 out_path = output_weights_path + self.gmodule._get_name()+'_FPweights.pth' 
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
+        self.gmodule = DianaModule.from_fp_model(self.gmodule) #f2f
+        self.gmodule.to(DianaModule.device)
         self.start_observing()
         # put 100 validation data sample through and initialize quantization hyperparameters 
         
