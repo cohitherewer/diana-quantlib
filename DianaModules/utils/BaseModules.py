@@ -30,7 +30,7 @@ from  torch.utils.data import Dataset as ds
 class DianaModule: # Base class for all diana models  
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
-     
+        graph_module.to(DianaModule.device) 
         self.gmodule = graph_module
         self._integrized = False 
         self.train_dataset = {} 
@@ -68,7 +68,7 @@ class DianaModule: # Base class for all diana models
         return self.gmodule.named_modules()
     
     @classmethod 
-    def from_fp_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
+    def from_trained_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
             ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} , ('const', {'a': 0.0 ,'b': 200}) , 'DIANA')), # upper clip is updated during training
@@ -138,7 +138,7 @@ class DianaModule: # Base class for all diana models
         self.validation_dataset['scale'] = scale 
         self.validation_dataset['dataset'] = dataset
         self.validation_dataset['size'] = len(dataset ) 
-      
+
     @classmethod
     def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None  ): 
         metrics = {'train': {'loss': [], 'acc': []} , 'validate': {'loss': [], 'acc': []} }
@@ -147,7 +147,7 @@ class DianaModule: # Base class for all diana models
         for e in range(epochs):     
             for stage in ['train', 'validate']: 
                 running_loss = 0 
-                running_correct = []
+                running_correct = 0
                 if stage == 'train': 
                     model.train() 
                 else : 
@@ -159,18 +159,20 @@ class DianaModule: # Base class for all diana models
                     if stage == 'validate': 
                         with torch.no_grad(): 
                             yhat = model(x)
+                            loss = criterion(yhat, y) 
                     else: 
-                        yhat = model(x) 
-                    loss = criterion(yhat, y) 
+                        with torch.set_grad_enabled(True):
+                            yhat = model(x) 
+                            loss = criterion(yhat, y) 
+                            loss.backward() 
+                            optimizer.step() 
+                    
                     predictions = torch.argmax(yhat)
-                    if stage == 'train': 
-                        loss.backward() 
-                        optimizer.step() 
           
                     running_loss += loss.item() *x.size(0) 
-                    running_correct.append(torch.tensor(torch.sum(predictions==y.data).item() / torch.numel(predictions)) ) # for classification problems_
+                    running_correct += torch.sum(predictions==y) .item()
                 e_loss = running_loss / len(data_loader[stage].dataset)
-                e_acc = torch.vstack(running_correct).mean()
+                e_acc = running_correct / len(data_loader[stage].dataset) 
                 print(f'Epoch {e+1} \t\t {stage} stage... Loss: {e_loss:.4f} Accuracy :{e_acc:.4f}')
                 if stage == 'train' and scheduler is not None: 
                     scheduler.step()
@@ -178,12 +180,11 @@ class DianaModule: # Base class for all diana models
                 metrics[stage]['acc'].append(e_acc)
         return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 64 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
-        self.gmodule.to(DianaModule.device)
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 128 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
 
-        optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.01 , momentum = 0.9, weight_decay=1e-4)  
+        optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
         if train_FP_model:  
             
             FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
@@ -192,7 +193,7 @@ class DianaModule: # Base class for all diana models
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
-        self.gmodule = DianaModule.from_fp_model(self.gmodule) #f2f
+        self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f
         self.gmodule.to(DianaModule.device)
         self.start_observing()
         # put 100 validation data sample through and initialize quantization hyperparameters 
