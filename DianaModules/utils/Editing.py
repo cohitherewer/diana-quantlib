@@ -193,7 +193,7 @@ class DianaQuantizerFuser(Rewriter) :
 #endregion
 
 # Modules to look for DIANAConv2d , DIANALinear , AvgPool2d  
-from torch import  Tensor, nn 
+from torch import   nn 
 
 #region Diana fake to true neural nets 
 
@@ -426,8 +426,6 @@ di_roles = Roles([
     ])),
 ])
    
-
-
 class DianaLinearOpIntegrizer(ComposedEditor):   
     def __init__(self):
         # generate rewriters for qconv2d and qlinear 
@@ -506,7 +504,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
             
         else : 
-            new_module = AnalogRequantizer() 
+            new_module = AnalogRequantizer(scale = torch.Tensor([2**round(math.log2(module_activation.n_levels))]) , zero = module_activation.zero , n_levels=module_activation.n_levels, mul=gamma_int , add=beta_int) 
             #raise ValueError
             
         

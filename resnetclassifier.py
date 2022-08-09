@@ -27,5 +27,5 @@ for idx , module in enumerate(converted.modules()):
     print (idx , "->" , module)
 
 data_folder = Path("trained_models/resnet18")
-#converted.QA_iterative_train(epochs=3 ,output_weights_path= str(data_folder.absolute())) 
+converted.QA_iterative_train(epochs=3 ,output_weights_path= str(data_folder.absolute())) 
 

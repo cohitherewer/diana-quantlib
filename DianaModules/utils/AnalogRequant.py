@@ -30,5 +30,6 @@ class AnalogQuantOp(torch.autograd.Function):
     @staticmethod
     def symbolic(g: torch._C.Graph, x: torch._C.Value, div :torch._C.Value , zero : torch._C.Value , clip_hi: torch.Tensor ,mul :torch._C.Value , add : torch._C.Value) -> torch._C.Value: # ensuring consistency in operators 
         # mul add div floor clip (min + max) 
-        return g.op("Mul", g.op("Add" , g.op("Min", g.op("Max" ,g.op("Floor", g.op("Div", x , g.op("Constant", value_t=torch.tensor(div, dtype=torch.float) ))) ,zero), clip_hi) , add ) , mul  )
+        return g.op("Min", g.op("Max" , g.op("Floor", g.op("Div" ,g.op("Add", g.op("Mul", x , mul)) ,add), div) , zero ) , clip_hi  )
+ 
  

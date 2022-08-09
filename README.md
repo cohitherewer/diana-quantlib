@@ -4,7 +4,7 @@ repository for the training framework of diana
 
 # Workflow
 - ## Pytorch Model 
-  The first step is to define a pytorch nn module and making sure that it is functional. If possible,  always use pytorch **nn.Module**'s as the building blocks for you model to ensure compatibility with the library. Non-modular functions should be avoided when possible. For example, it would be better to use **nn.ReLU** instead of **nn.functional.relu**. To begin your workflow, a **DianaModule** instance needs to be defined from a standard pytorch Module using the **from_fp_model** class method. This instantiation defines some specifications and generates the graph we'll be using for the rest of the conversion and training process.  
+  The first step is to define a pytorch nn module and making sure that it is functional. If possible,  always use pytorch **nn.Module**'s as the building blocks for you model to ensure compatibility with the library. Non-modular functions should be avoided when possible. For example, it would be better to use **nn.ReLU** instead of **nn.functional.relu**. To begin your workflow, a **DianaModule** instance needs to be defined from a standard pytorch Module using the **from_fp_model** class method. This instantiation defines some specifications and generates the graph we'll be using for the rest of the conversion and training processes.  
 - ## Iterative Training
   - **Iteration 1**: As regularly done, the torch floating-point Model is trained. 
   - **Iteration 2**: Model is fake-quantized to 8-bits and then re-trained to regain the lost accuracy. 

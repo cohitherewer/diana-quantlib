@@ -192,15 +192,14 @@ class DianaModule: # Base class for all diana models
         self.start_observing()
         # put 100 validation data sample through and initialize quantization hyperparameters 
         
-        for i in range(100): 
+        for i in range(400): 
             idx  = randint(0 , self.validation_dataset['size'] -1 )
-            x, _ = self.validation_dataset['dataset'].__getitem__(idx)
+            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
             if len(x.shape) == 3 : 
                 x = x.unsqueeze(0)
-            x = x/self.validation_dataset['scale'] 
             _ = self.gmodule(x) 
-
         self.stop_observing() 
+        
         if train_8bit_model: 
             q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 
