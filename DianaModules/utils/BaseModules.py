@@ -167,7 +167,7 @@ class DianaModule: # Base class for all diana models
                             loss.backward() 
                             optimizer.step() 
                     
-                    predictions = torch.argmax(yhat)
+                    predictions = torch.argmax(yhat , 1)
           
                     running_loss += loss.item() *x.size(0) 
                     running_correct += torch.sum(predictions==y) .item()
@@ -193,19 +193,21 @@ class DianaModule: # Base class for all diana models
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_training_metrics(FP_metrics) 
         #Iteration 2 - Fake Quantistion all to 8 bit 
-        self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f
-        self.gmodule.to(DianaModule.device)
+        self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f 
+        self.gmodule = self.gmodule.to('cpu')
         self.start_observing()
         # put 100 validation data sample through and initialize quantization hyperparameters 
-        
+        # do this in CPU 
         for i in range(400): 
-            idx  = randint(0 , self.validation_dataset['size'] -1 )
+            idx  = randint(0 , self.validation_dataset['size'] -2 )
             x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
+    
             if len(x.shape) == 3 : 
                 x = x.unsqueeze(0)
-            _ = self.gmodule(x) 
+                _ = self.gmodule(x) 
         self.stop_observing() 
-        
+        # return model to gpu for trianing 
+        self.gmodule = self.gmodule.to(device=DianaModule.device)
         if train_8bit_model: 
             q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 

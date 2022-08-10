@@ -1,8 +1,6 @@
 
 from abc import abstractmethod
 import enum
-from numpy import require
-
 import torch 
 from torch import Tensor, nn
 from typing import Union , Tuple
@@ -75,6 +73,9 @@ class DIANALinear(QLinear , DianaBaseOperation):
             self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})              
+    def forward(self, x: torch.Tensor) : 
+        x = x.to(self.weight.device)
+        return super().forward(x) 
 # Activations
 class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity for harmoniser adds ( Quant operation )
     def __init__(self,
@@ -126,17 +127,14 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
         # edit the scale
 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-
         if HW_Behaviour: 
             self.redefine_qhparams({'bitwidth' : 8, 'signed': False})
-
             #  clip here and freeze 
             self.freeze() 
-            
-
-            
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+    
+
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
 class DIANAConv2d(QConv2d , DianaBaseOperation):
     
@@ -189,5 +187,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
-
+    def forward(self, x: torch.Tensor) : 
+        x = x.to(self.weight.device)
+        return super().forward(x)
 
