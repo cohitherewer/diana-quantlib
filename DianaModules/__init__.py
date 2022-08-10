@@ -7,7 +7,8 @@ NNMODULE_TO_DIANA = ModuleMapping ([
     (nn.Identity,  DIANAIdentity),
     (nn.ReLU , DIANAReLU),
    (nn.Linear , DIANALinear ), 
-    (nn.Conv2d , DIANAConv2d) ])
+    (nn.Conv2d , DIANAConv2d) 
+    ])
     
 register['DIANA'] = NNMODULE_TO_DIANA
 #import onnx

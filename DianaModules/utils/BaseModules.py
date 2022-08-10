@@ -70,13 +70,13 @@ class DianaModule: # Base class for all diana models
     @classmethod 
     def from_trained_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
-            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} , ('const', {'a': 0.0 ,'b': 200}) , 'DIANA')), # upper clip is updated during training
-            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
+            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} , ('const', {'a': 0.0 ,'b': 6}) , 'DIANA')), # upper clip is updated during training
+            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
         )
             
         # `AddTreeHarmoniser` argument
-        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA')
+        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'minmax', 'DIANA')
         addtreeforceoutputeps =  False # set to false because each module quantizes the input differently 
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
@@ -154,6 +154,7 @@ class DianaModule: # Base class for all diana models
                     model.eval () 
             
                 for i,data in enumerate(data_loader[stage]): 
+                    
                     x , y = data[0].to(cls.device), data[1].to(cls.device)
                     optimizer.zero_grad() 
                     if stage == 'validate': 
@@ -168,9 +169,10 @@ class DianaModule: # Base class for all diana models
                             optimizer.step() 
                     
                     predictions = torch.argmax(yhat , 1)
-          
+
                     running_loss += loss.item() *x.size(0) 
                     running_correct += torch.sum(predictions==y) .item()
+         
                 e_loss = running_loss / len(data_loader[stage].dataset)
                 e_acc = running_correct / len(data_loader[stage].dataset) 
                 print(f'Epoch {e+1} \t\t {stage} stage... Loss: {e_loss:.4f} Accuracy :{e_acc:.4f}')
@@ -178,20 +180,25 @@ class DianaModule: # Base class for all diana models
                     scheduler.step()
                 metrics[stage]['loss'].append(e_loss)
                 metrics[stage]['acc'].append(e_acc)
+  
         return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 128 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 128 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True, load_FP_model_path : str = None): 
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=floor(batch_size/self.train_dataset['size'] * self.validation_dataset['size']))}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
 
-        optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
+        
         if train_FP_model:  
             
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
             FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 
-                out_path = output_weights_path + self.gmodule._get_name()+'_FPweights.pth' 
+                out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' 
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_training_metrics(FP_metrics) 
+        elif load_FP_model_path is not None: 
+            self.gmodule.load_state_dict(torch.load(load_FP_model_path)) 
+            
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f 
         self.gmodule = self.gmodule.to('cpu')
@@ -200,18 +207,19 @@ class DianaModule: # Base class for all diana models
         # do this in CPU 
         for i in range(400): 
             idx  = randint(0 , self.validation_dataset['size'] -2 )
-            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
+            x, _ = self.train_dataset['dataset'].__getitem__(idx) 
     
             if len(x.shape) == 3 : 
                 x = x.unsqueeze(0)
                 _ = self.gmodule(x) 
         self.stop_observing() 
         # return model to gpu for trianing 
-        self.gmodule = self.gmodule.to(device=DianaModule.device)
+        self.gmodule = self.gmodule.to(DianaModule.device)
         if train_8bit_model: 
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
             q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 
-                out_path = output_weights_path + self.gmodule._get_name()+'_FQ8weights.pth' 
+                out_path = output_weights_path + "/"+self.gmodule._get_name()+'_FQ8weights.pth' 
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_metrics(q8b_metrics ) 
         #Iteration 3 - Input HW specific quantisation, map scales 
@@ -219,7 +227,7 @@ class DianaModule: # Base class for all diana models
         if train_HWmapped_model:  
             qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 
-                out_path = output_weights_path + self.gmodule._get_name()+'_FQDianaweights.pth' 
+                out_path = output_weights_path +"/"+ self.gmodule._get_name()+'/_FQDianaweights.pth' 
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_metrics(qHW_metrics) 
         #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
@@ -227,7 +235,7 @@ class DianaModule: # Base class for all diana models
         if train_HW_model: 
             qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             if output_weights_path is not None : 
-                out_path = output_weights_path + self.gmodule._get_name()+'_FQHWweights.pth' 
+                out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQHWweights.pth' 
                 torch.save(self.gmodule.state_dict(), out_path)
             #DianaModule.plot_metrics(qSc_metrics ) 
 

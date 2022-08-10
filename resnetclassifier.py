@@ -25,5 +25,6 @@ converted.attach_validation_dataset(validation_dataset, train_scale)
 
 
 data_folder = Path("trained_models/resnet18")
-converted.QA_iterative_train(epochs=3, batch_size=256 ,output_weights_path= str(data_folder.absolute())) 
+weight_folder =Path("trained_models/resnet18/ResNet_FPweights.pth")
+converted.QA_iterative_train(epochs=3, batch_size=256 ,output_weights_path= str(data_folder.absolute()), train_FP_model=False , load_FP_model_path=str(weight_folder.absolute())) 
 

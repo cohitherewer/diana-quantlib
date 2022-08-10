@@ -54,13 +54,9 @@ class DIANALinear(QLinear , DianaBaseOperation):
                  super().__init__(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec ,in_features=in_features, out_features=out_features, bias=bias) 
-                 self.relu_output = False 
+               
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeDQuantiser.apply 
-    def set_relu_on (self) :
-        self.relu_output = True 
-    def is_relu_on(self) : 
-        return self.relu_output
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         bw_clip_lo = 2**round(math.log2((abs(self.clip_lo)/ (self.scale * self.step)).item())) #quantized clip lo and high
         bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
@@ -123,7 +119,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     def stop_observing(self):
         super().stop_observing() 
         self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
-        self.freeze()
+        #self.freeze()
         # edit the scale
 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
@@ -152,7 +148,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  bias : bool = False 
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
-                    self.relu_output = False 
+                    
                     super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -163,7 +159,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                          padding,
                          dilation,
                          groups,
-                         bias=bias) # you can remove all this bias stuff 
+                         bias=bias) 
 
           
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
@@ -173,11 +169,12 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
             self._qop = _FakeDQuantiser.apply 
  
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        return self._qop(x, self.clip_lo, self.clip_hi, self.step, self.scale) 
-    def set_relu_out (self) :
-        self.relu_output = True 
-    def is_relu_out(self) : 
-        return self.relu_output
+        bw_clip_lo = 2**round(math.log2((abs(self.clip_lo)/ (self.scale * self.step)).item())) #quantized clip lo and high
+        bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
+        if self.clip_lo < 0: 
+            bw_clip_lo = -bw_clip_lo 
+        return self._qop(x, bw_clip_lo, bw_clip_hi, self.step, self.scale) 
+   
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             if (self.is_analog): 

@@ -106,7 +106,7 @@ class DianaF2FQuantiser(ComposedEditor):
        
            
             
-            DianaF2FInterposer()  , 
+            DianaF2FInterposer()  ,  
         
             
             
@@ -119,7 +119,7 @@ class DianaF2FQuantiser(ComposedEditor):
             DianaQuantizerFuser() ,# ignore the harmonise adds 
            
            
-        ]) # Add interposer here 
+        ]) 
 
 # each conv layer will have a a value indicating if the output is used in activation (ReLU) . if there is then we put a a ReLU activation afterwards. otherwise it's just the identity ( This is done in the interposer )
 
@@ -492,8 +492,8 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
 
         gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels)) * (eps_in * gamma)             / (sigma * eps_out))) # clip to the power of 2 
         if gamma_int == torch.Tensor([0]) :  # truncation 
-            #raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
-            gamma_int = torch.tensor([2**round(math.log2(module_activation.n_levels)) /2])# just for testing now
+            raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
+            #gamma_int = torch.tensor([2**round(math.log2(module_activation.n_levels)) /2])#TODO REMOVE THIS just for testing now
   
         beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))
         div =(2**round(math.log2(module_activation.n_levels)))  / gamma_int

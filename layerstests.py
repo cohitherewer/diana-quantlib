@@ -1,8 +1,7 @@
-from lib2to3.pytree import convert
-from turtle import down, forward
+
 import torch
 from torch import nn
-from DianaModules.core.Operations import DIANAConv2d, DIANAIdentity
+from DianaModules.core.Operations import DIANAConv2d, DIANAIdentity, DIANAReLU
 import DianaModules.core.Operations as di
 import DianaModules.utils.BaseModules as bm
 from DianaModules.utils.DigitalRequant import DigitalRequantizer
@@ -115,13 +114,14 @@ test_model = dcore_network()
 
 
 dataset = ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+validation_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=True, transform=torchvision.transforms.ToTensor())  
 
 scale = 1/256
 test_indices = list(range(0, 100))
 
 
-converted_graph = bm.DianaModule.from_trained_model(test_model) 
-
+converted_graph = bm.DianaModule(bm.DianaModule.from_trained_model(test_model) ) 
+converted_graph.gmodule.delete_all_unused_submodules()
 
 converted_graph.start_observing() 
 
@@ -132,17 +132,20 @@ for i in  test_indices :
 
 
 converted_graph.stop_observing() 
-
+for _ , module in  converted_graph.named_modules(): 
+    print (_ , type(module))
+    if (isinstance(module, DIANAReLU)): 
+        module.freeze()
 converted_graph.clip_scales() 
 
 
 print ("After fake quantization") 
 
-for _ , module in  converted_graph.named_modules(): 
-    print (_ , type(module))
+
 #converted_graph.map_scales(HW_Behaviour=True)
 # true quant 
 converted_graph.attach_train_dataset(dataset , torch.Tensor([scale]))
+converted_graph.attach_validation_dataset(validation_dataset , torch.Tensor([scale]))
 converted_graph.true_quantize([ ILSVRC12.ResNet.RNHeadRewriter()])
 
 print ("After true quantization") 
