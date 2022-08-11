@@ -36,7 +36,6 @@ class DianaBaseOperation:
         self.n_levels=  torch.tile(n_levels,     self._observer.broadcasting_shape)
         self.step=  torch.tile(step,    self._observer.broadcasting_shape)
         self.scale =  torch.tile(scale,   self._observer.broadcasting_shape)
-        self._init_qhparams() # reinitialize scale and zero 
     def get_bitwidth(self): 
         pass
 
@@ -116,15 +115,16 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
             return 8 
 
 class DIANAReLU( PACTReLU  , DianaBaseOperation): 
-    def stop_observing(self):
-        super().stop_observing() 
-        self.bw_clip_hi = 2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) - 1
-        #self.freeze()
-        # edit the scale
-
+    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False , is_analog : bool = False):
+        self.is_analog = is_analog
+        super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 8, 'signed': False})
+            if self.is_analog: 
+                self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
+            else: 
+                self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
+
             #  clip here and freeze 
             self.freeze() 
         else : 
