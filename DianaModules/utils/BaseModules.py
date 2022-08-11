@@ -189,9 +189,10 @@ class DianaModule: # Base class for all diana models
 
         
         if train_FP_model:  
-            
+            print("Training FP Model...")
             optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
             FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            print("Finished Training FP Model...")
             #DianaModule.plot_training_metrics(FP_metrics) 
         if output_weights_path is not None : 
             out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' 
@@ -216,8 +217,10 @@ class DianaModule: # Base class for all diana models
         # return model to gpu for trianing 
         self.gmodule = self.gmodule.to(DianaModule.device)
         if train_8bit_model: 
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
+            print("Training 8bit Model...")
+            optimizer = optim.Adam(self.gmodule.parameters() , lr = 0.01 ,  weight_decay=1e-4)  
             q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            print("Finished Training 8bit Model...")
             #DianaModule.plot_metrics(q8b_metrics ) 
         if output_weights_path is not None : 
             out_path = output_weights_path + "/"+self.gmodule._get_name()+'_FQ8weights.pth' 
@@ -241,9 +244,11 @@ class DianaModule: # Base class for all diana models
         # return model to gpu
         self.gmodule = self.gmodule.to(DianaModule.device)
         if train_HWmapped_model:  
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
+            print("Training HW_Mapped Model...")
+            optimizer = optim.Adam(self.gmodule.parameters() , lr = 0.001 ,  weight_decay=1e-5)  
             qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             #DianaModule.plot_metrics(qHW_metrics)
+            print("Finished Training HW_Mapped Model...")
         if output_weights_path is not None : 
             out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQDianaweights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
@@ -251,8 +256,10 @@ class DianaModule: # Base class for all diana models
         #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
         self.clip_scales() 
         if train_HW_model: 
+            print("Training Final HW Model...")
             qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             #DianaModule.plot_metrics(qSc_metrics ) 
+            print("Finished Final HW Model...")
         if output_weights_path is not None : 
             out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQHWweights.pth' 
             torch.save(self.gmodule.state_dict(), out_path)
