@@ -63,7 +63,7 @@ class _DianaNode:
         return self._node
     @property 
     def type(self): 
-        return self._type
+        return self._type 
    
 class DianaAps(ApplicationPoint, _DianaNode):
     
@@ -169,8 +169,11 @@ class DianaQuantizerFuserApplier(Applier) :
 
             for p_node in cur_node_users: 
                 p_node.replace_input_with(ap.node, pre_node)
-            pre_module.clip_lo = max(pre_module.clip_lo , cur_module.clip_lo)
-            pre_module.clip_hi = min(pre_module.clip_hi , cur_module.clip_hi)
+            # lower bitwidth but zero might be different 
+            if(pre_module.zero != cur_module.zero)  : 
+                pre_module.zero = max(pre_module.zero , cur_module.zero)  
+                pre_module.n_levels =( min(pre_module.zero+pre_module.n_levels,cur_module.zero+cur_module.n_levels) - pre_module.zero)/pre_module.step# (min clip_hi - zero )/step
+            
             g.delete_submodule(ap.node.target)
             g.graph.erase_node(ap.node)
             # Edit clipping of pre_node        
@@ -179,8 +182,10 @@ class DianaQuantizerFuserApplier(Applier) :
             if len(pre_node_users)  == 1:  # make sure pre node only has 1 user
                 for user in pre_node_users:  #without ap.node
                     user.replace_input_with(pre_node, ap.node)
-                cur_module.clip_lo = max(pre_module.clip_lo , cur_module.clip_lo)
-                cur_module.clip_hi = min(pre_module.clip_hi , cur_module.clip_hi)
+                if(pre_module.zero != cur_module.zero)  : 
+                    cur_module.zero = max(pre_module.zero , cur_module.zero)  
+                    cur_module.n_levels =( min(pre_module.zero+pre_module.n_levels,cur_module.zero+cur_module.n_levels) - cur_module.zero)/cur_module.step# (min clip_hi - zero )/step
+            
                 g.delete_submodule(pre_node.target)
                 g.graph.erase_node(pre_node)
         
