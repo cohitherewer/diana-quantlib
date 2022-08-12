@@ -4,7 +4,7 @@ from collections import OrderedDict
 from pathlib import Path
 import torch 
 from torch import nn 
-from DianaModules.models.resnet import resnet20
+from DianaModules.models.LargeResnet import resnet20
 from DianaModules.utils.BaseModules import DianaModule 
 from torchvision import datasets as ds 
 import torchvision
@@ -37,5 +37,5 @@ converted.attach_validation_dataset(validation_dataset, train_scale)
 
 
 data_folder = Path("trained_models/resnet20")
-converted.QA_iterative_train(epochs=1, batch_size=128, train_FP_model=False ,train_8bit_model=True,train_HWmapped_model=False,   output_weights_path=str(data_folder.absolute()) ) 
+converted.QA_iterative_train(epochs=3, batch_size=128, train_FP_model=False , train_8bit_model=False , train_HWmapped_model=False ) 
 

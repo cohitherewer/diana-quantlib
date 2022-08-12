@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 import torch 
 from torch import nn 
-from DianaModules.models.resnet import ResNet18 
+from DianaModules.models.LargeResnet import ResNet18 
 from DianaModules.utils.BaseModules import DianaModule 
 from torchvision import datasets as ds 
 import torchvision

@@ -22,7 +22,7 @@ import math
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
 from DianaModules.utils._FakeQuantizer import _FakeDQuantiser, _FakeAQuantiser
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
-
+from quantlib.algorithms.qbase import get_zero_scale, get_scale
 class DianaBaseOperation:   
     @abstractmethod
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): 
@@ -30,12 +30,21 @@ class DianaBaseOperation:
     
     def redefine_qhparams(self : _QModule, qrangespec:               QRangeSpecType):  
         assert(issubclass(type(self), _QModule))
+        device = self.zero.device 
         self._qrange = resolve_qrangespec(qrangespec)
         zero, n_levels, step, scale = create_qhparams(self._qrange)
-        self.zero =  torch.tile(zero,     self.zero.shape)
-        self.n_levels=  torch.tile(n_levels,     self.n_levels.shape)
-        self.step=  torch.tile(step,    self.step.shape)
-        self.scale =  torch.tile(scale,   self.scale.shape)
+        self.zero =  torch.tile(zero,     self.zero.shape).to(device)
+        self.n_levels=  torch.tile(n_levels,     self.n_levels.shape).to(device)
+        self.step=  torch.tile(step,    self.step.shape).to(device)
+        self.scale =  torch.tile(scale,   self.scale.shape).to(device)
+        if self._pin_offset:
+            scale = get_scale(self.min_float, self.max_float, self.zero, self.n_levels, self.step)
+            self.scale.data.copy_(scale.to(device=self.scale.device))
+        else:
+            zero, scale = get_zero_scale(self.min_float, self.max_float, self.n_levels, self.step)
+            self.zero.data.copy_(zero.to(device=self.scale.device))
+            self.scale.data.copy_(scale.to(device=self.scale.device))
+        self._set_clipping_bounds()
     def get_bitwidth(self): 
         pass
 
@@ -148,7 +157,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  bias : bool = False 
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
-                    self.scaled_mapped=True #TODO change this later
+                    self.scaled_mapped=False #TODO change this later
                     super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -171,22 +180,24 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         
         
-        #if len(self.clip_lo.shape ) > 2: 
-            #for c in range(self.clip_lo.size(1)) : 
-                #if self.clip_lo[0][c][0][0] < 0 : 
-                    #bw_clip_lo[0][c][0][0] =  -bw_clip_lo[0][c][0][0] 
-                    #print(self.clip_hi[0][c][0][0] )
-                #if self.clip_lo[0][c][0][0] >  self.clip_hi[0][c][0][0] :  
-                    #print(self.clip_lo[0][c][0][0] )
+        
        
         if self.scaled_mapped: # ternary: 
             bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
             bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device) 
         else: 
-            bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) )#quantized clip lo and high
-            bw_clip_hi = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) ) 
-            if self.clip_lo < 0: 
-                bw_clip_lo = -bw_clip_lo 
+            bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) ).to(self.clip_lo.device)#quantized clip lo and high
+            bw_clip_hi = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) ).to(self.clip_lo.device) -1 
+            
+            if len(self.clip_lo.shape ) > 3: 
+                for c in range(self.clip_lo.size(0)) : 
+                    if self.clip_lo[c][0][0][0] < 0 : 
+                        bw_clip_lo[c][0][0][0] =  -bw_clip_lo[c][0][0][0] 
+                      
+            else: 
+                if self.clip_lo < 0: 
+                    bw_clip_lo = -bw_clip_lo 
+          
         return self._qop(x, bw_clip_lo, bw_clip_hi, self.step, self.scale) 
    
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):

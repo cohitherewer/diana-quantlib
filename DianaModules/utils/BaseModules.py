@@ -49,14 +49,11 @@ class DianaModule: # Base class for all diana models
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): # before mapping scale and retraining # TODO change from new_bitwdith and signed to list of qrangespecs or an arbitary number of kwqrgs  
         for _ ,module in enumerate(self.gmodule.modules()): 
             if (issubclass(type(module), _QModule) and issubclass(type(module), DianaBaseOperation)  and module._is_quantised) : 
-                module._is_quantised = torch.tensor([False])
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
-    def clip_scales(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
+    def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
             if issubclass(type(module), _QModule) and module._is_quantised: 
-                module.scale = torch.Tensor(torch.exp2(torch.floor(torch.log2(module.scale))) )
-               
-                    
+                module.scale = torch.Tensor(torch.exp2(torch.floor(torch.log2(module.scale))) )     
             elif (issubclass(type(module),DianaModule) and self is not module) : 
                 module.clip_scales() # recursion
     def forward(self, x : torch.Tensor) : 
@@ -72,8 +69,8 @@ class DianaModule: # Base class for all diana models
     def from_trained_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} , ('const', {'a': 0.0 ,'b': 10.0}) , 'DIANA')), # upper clip is updated during training
-            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights', 'ternary',  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} , ('const', {'a': 0.0 ,'b': 6}) , 'DIANA')), # upper clip is updated during training
+            ({'types': ( 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
             ({'types': ( 'Linear' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
             
@@ -92,7 +89,6 @@ class DianaModule: # Base class for all diana models
         
         return converted_graph
          
-
     def true_quantize(self, custom_editors : List[Editor]=[]): # integrise model 
         converter = DianaF2TConverter(custom_editor=custom_editors)
         x, _ = self.train_dataset['dataset'].__getitem__(0)
@@ -130,7 +126,6 @@ class DianaModule: # Base class for all diana models
         plot2.plot(metrics['validate']['acc'], label='val acc')
         plot2.legend()
     
-
     def attach_train_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])):        
         self.train_dataset['scale'] = scale 
         self.train_dataset['dataset'] = dataset
@@ -216,12 +211,14 @@ class DianaModule: # Base class for all diana models
                 x = x.unsqueeze(0)
                 _ = self.gmodule(x) 
         self.stop_observing() 
-        
+       
+        self.gmodule = nn.DataParallel(self.gmodule )
+    
         # return model to gpu for trianing 
-        self.gmodule = self.gmodule.to(DianaModule.device)
+        self.gmodule.to(DianaModule.device)
         if train_8bit_model: 
             print("Training 8bit Model...")
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum=0.9,  weight_decay=1e-6) 
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.001 , momentum=0.9,  weight_decay=1e-5) 
             
             q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             print("Finished Training 8bit Model...")
@@ -231,7 +228,7 @@ class DianaModule: # Base class for all diana models
             torch.save(self.gmodule.state_dict(), out_path)
             
         #Iteration 3 - Input HW specific quantisation, map scales 
-        #self.map_scales(HW_Behaviour=True)
+        self.map_scales(HW_Behaviour=True)
         #self.gmodule = self.gmodule.to('cpu')
 
         #self.start_observing()
@@ -252,8 +249,8 @@ class DianaModule: # Base class for all diana models
         #self.gmodule = self.gmodule.to(DianaModule.device)
         if train_HWmapped_model:  
             print("Training HW_Mapped Model...")
-            optimizer = optim.Adam(self.gmodule.parameters() , lr = 0.1 ,  weight_decay=1e-4)  
-            qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.04 , momentum=0.9,  weight_decay=1e-5)  
+            qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, 20, criterion, scheduler )# for testing
             #DianaModule.plot_metrics(qHW_metrics)
             print("Finished Training HW_Mapped Model...")
         if output_weights_path is not None : 
@@ -261,10 +258,11 @@ class DianaModule: # Base class for all diana models
             torch.save(self.gmodule.state_dict(), out_path)
              
         #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
-        self.clip_scales() 
+        self.clip_scales_pow2() 
         if train_HW_model: 
             print("Training Final HW Model...")
-            qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.04 , momentum=0.9,  weight_decay=1e-5)  
+            qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, 20, criterion, scheduler )
             #DianaModule.plot_metrics(qSc_metrics ) 
             print("Finished Final HW Model...")
         if output_weights_path is not None : 
@@ -274,7 +272,6 @@ class DianaModule: # Base class for all diana models
 
 
 
-# - In the integrised model pass the relu clipping as a scale and then divide by scale in following conv module
 # write your own applier that is added in the end to replace first conv layer with digital conv and replace harmonise adds with a correct dianamodule 
 # Could write custom harmoniser or edit the harmoniser adds in the true quant step 
 

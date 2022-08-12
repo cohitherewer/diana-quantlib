@@ -12,7 +12,7 @@ from quantlib.editing.editing.tests import ILSVRC12
 import quantlib.editing.graphs as qg
 from torchvision import datasets as ds
 import torchvision.transforms
-from DianaModules.models.resnet import ResNet18
+from DianaModules.models.LargeResnet import ResNet18
 import torch.nn.functional as F
 
 # test identity 
@@ -136,7 +136,7 @@ for _ , module in  converted_graph.named_modules():
     print (_ , type(module))
     if (isinstance(module, DIANAReLU)): 
         module.freeze()
-converted_graph.clip_scales() 
+converted_graph.clip_scales_pow2() 
 
 
 print ("After fake quantization") 
