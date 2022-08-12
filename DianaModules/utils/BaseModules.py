@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Union
 import matplotlib as plt
 from numpy import isin 
 
-from DianaModules.core.Operations import DianaBaseOperation
+from DianaModules.core.Operations import DIANAReLU, DianaBaseOperation
 from DianaModules.utils.onnx import DianaExporter
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -49,11 +49,12 @@ class DianaModule: # Base class for all diana models
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): # before mapping scale and retraining # TODO change from new_bitwdith and signed to list of qrangespecs or an arbitary number of kwqrgs  
         for _ ,module in enumerate(self.gmodule.modules()): 
             if (issubclass(type(module), _QModule) and issubclass(type(module), DianaBaseOperation)  and module._is_quantised) : 
+                module._is_quantised = torch.tensor([False])
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
     def clip_scales(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
             if issubclass(type(module), _QModule) and module._is_quantised: 
-                module.scale = torch.tensor(2**floor(log2(module.scale))) 
+                module.scale = torch.Tensor(torch.exp2(torch.floor(torch.log2(module.scale))) )
                
                     
             elif (issubclass(type(module),DianaModule) and self is not module) : 
@@ -71,8 +72,9 @@ class DianaModule: # Base class for all diana models
     def from_trained_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} , ('const', {'a': 0.0 ,'b': 6.0}) , 'DIANA')), # upper clip is updated during training
-            ({'types': ('Linear', 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} , ('const', {'a': 0.0 ,'b': 10.0}) , 'DIANA')), # upper clip is updated during training
+            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights', 'ternary',  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
+            ({'types': ( 'Linear' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
             
         # `AddTreeHarmoniser` argument
@@ -183,7 +185,7 @@ class DianaModule: # Base class for all diana models
   
         return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 128 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): 
+    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 128 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): # example of workflow
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=batch_size, shuffle=True  ,pin_memory=True)}
         #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
 
@@ -214,11 +216,13 @@ class DianaModule: # Base class for all diana models
                 x = x.unsqueeze(0)
                 _ = self.gmodule(x) 
         self.stop_observing() 
+        
         # return model to gpu for trianing 
         self.gmodule = self.gmodule.to(DianaModule.device)
         if train_8bit_model: 
             print("Training 8bit Model...")
-            optimizer = optim.Adam(self.gmodule.parameters() , lr = 0.01 ,  weight_decay=1e-4)  
+            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum=0.9,  weight_decay=1e-6) 
+            
             q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             print("Finished Training 8bit Model...")
             #DianaModule.plot_metrics(q8b_metrics ) 
@@ -227,25 +231,28 @@ class DianaModule: # Base class for all diana models
             torch.save(self.gmodule.state_dict(), out_path)
             
         #Iteration 3 - Input HW specific quantisation, map scales 
-        self.gmodule = self.gmodule.to('cpu')
-        self.start_observing()
-        # put 100 validation data sample through and initialize quantization hyperparameters 
-        # do this in CPU 
-        for i in range(400): 
-            idx  = randint(0 , self.validation_dataset['size'] -2 )
-            x, _ = self.train_dataset['dataset'].__getitem__(idx) 
-    
-            if len(x.shape) == 3 : 
-                x = x.unsqueeze(0)
-                _ = self.gmodule(x) 
-        self.map_scales(HW_Behaviour=True)
-        self.stop_observing() 
+        #self.map_scales(HW_Behaviour=True)
+        #self.gmodule = self.gmodule.to('cpu')
 
-        # return model to gpu
-        self.gmodule = self.gmodule.to(DianaModule.device)
+        #self.start_observing()
+        
+        ## put 100 validation data sample through and initialize quantization hyperparameters 
+        ## do this in CPU 
+        #for i in range(400): 
+            #idx  = randint(0 , self.validation_dataset['size'] -2 )
+            #x, _ = self.train_dataset['dataset'].__getitem__(idx) 
+    
+            #if len(x.shape) == 3 : 
+                #x = x.unsqueeze(0)
+                #_ = self.gmodule(x) 
+        
+        #self.stop_observing() 
+
+        ## return model to gpu
+        #self.gmodule = self.gmodule.to(DianaModule.device)
         if train_HWmapped_model:  
             print("Training HW_Mapped Model...")
-            optimizer = optim.Adam(self.gmodule.parameters() , lr = 0.001 ,  weight_decay=1e-5)  
+            optimizer = optim.Adam(self.gmodule.parameters() , lr = 0.1 ,  weight_decay=1e-4)  
             qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
             #DianaModule.plot_metrics(qHW_metrics)
             print("Finished Training HW_Mapped Model...")

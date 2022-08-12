@@ -32,10 +32,10 @@ class DianaBaseOperation:
         assert(issubclass(type(self), _QModule))
         self._qrange = resolve_qrangespec(qrangespec)
         zero, n_levels, step, scale = create_qhparams(self._qrange)
-        self.zero =  torch.tile(zero,     self._observer.broadcasting_shape)
-        self.n_levels=  torch.tile(n_levels,     self._observer.broadcasting_shape)
-        self.step=  torch.tile(step,    self._observer.broadcasting_shape)
-        self.scale =  torch.tile(scale,   self._observer.broadcasting_shape)
+        self.zero =  torch.tile(zero,     self.zero.shape)
+        self.n_levels=  torch.tile(n_levels,     self.n_levels.shape)
+        self.step=  torch.tile(step,    self.step.shape)
+        self.scale =  torch.tile(scale,   self.scale.shape)
     def get_bitwidth(self): 
         pass
 
@@ -120,7 +120,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
-            if self.is_analog: 
+            if  self.is_analog:
                 self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
             else: 
                 self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
@@ -148,7 +148,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  bias : bool = False 
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
-                    
+                    self.scaled_mapped=True #TODO change this later
                     super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -169,16 +169,31 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
             self._qop = _FakeDQuantiser.apply 
  
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        bw_clip_lo = 2**round(math.log2((abs(self.clip_lo)/ (self.scale * self.step)).item())) #quantized clip lo and high
-        bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
-        if self.clip_lo < 0: 
-            bw_clip_lo = -bw_clip_lo 
+        
+        
+        #if len(self.clip_lo.shape ) > 2: 
+            #for c in range(self.clip_lo.size(1)) : 
+                #if self.clip_lo[0][c][0][0] < 0 : 
+                    #bw_clip_lo[0][c][0][0] =  -bw_clip_lo[0][c][0][0] 
+                    #print(self.clip_hi[0][c][0][0] )
+                #if self.clip_lo[0][c][0][0] >  self.clip_hi[0][c][0][0] :  
+                    #print(self.clip_lo[0][c][0][0] )
+       
+        if self.scaled_mapped: # ternary: 
+            bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
+            bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device) 
+        else: 
+            bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) )#quantized clip lo and high
+            bw_clip_hi = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) ) 
+            if self.clip_lo < 0: 
+                bw_clip_lo = -bw_clip_lo 
         return self._qop(x, bw_clip_lo, bw_clip_hi, self.step, self.scale) 
    
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             if (self.is_analog): 
-                self.redefine_qhparams('ternary') 
+                self.redefine_qhparams('ternary')
+                self.scaled_mapped = True 
             else: 
                 self.redefine_qhparams({'bitwidth' : 8 , 'signed': True})   
 
