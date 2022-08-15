@@ -26,6 +26,8 @@ from torch import optim
 import torch.utils.data as ut 
 from  torch.utils.data import Dataset as ds  
 
+import importlib
+
 
 class DianaModule: # Base class for all diana models  
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -137,9 +139,9 @@ class DianaModule: # Base class for all diana models
         self.validation_dataset['size'] = len(dataset ) 
 
     @classmethod
-    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None  ): 
+    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None , model_save_path : str = None ): 
         metrics = {'train': {'loss': [], 'acc': []} , 'validate': {'loss': [], 'acc': []} }
-        
+        max_val_acc = 0 
         assert (model and optimizer) 
         for e in range(epochs):     
             for stage in ['train', 'validate']: 
@@ -177,6 +179,16 @@ class DianaModule: # Base class for all diana models
                     scheduler.step()
                 metrics[stage]['loss'].append(e_loss)
                 metrics[stage]['acc'].append(e_acc)
+                if stage == 'validate' and e_acc > max_val_acc and model_save_path is not None: 
+                    # save best state dict acc model on 
+                    torch.save ({
+                        'epoch': e,
+                        'state_dict': model.state_dict(),
+                        'loss': e_loss,
+                        'acc' : e_acc 
+                    } , model_save_path)
+                    max_val_acc = e_acc 
+                    pass 
   
         return metrics  
 
@@ -187,23 +199,57 @@ class DianaModule: # Base class for all diana models
         
         if train_FP_model:  
             print("Training FP Model...")
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.1 , momentum = 0.9, weight_decay=1e-4)  
-            FP_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
+            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' if output_weights_path is not None else None
+            self.configure_optimizer('SGD' ,lr = 0.07 , momentum = 0.9, weight_decay=1e-4)
+            FP_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
             print("Finished Training FP Model...")
             #DianaModule.plot_training_metrics(FP_metrics) 
-        if output_weights_path is not None : 
-            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-            
-        
-            
+                 
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f 
+        self.initialize_quantization() 
+        if train_8bit_model: 
+            print("Training 8bit Model...")
+            self.configure_optimizer('SGD', lr = 0.001 , momentum=0.9,  weight_decay=1e-5)
+            out_path = output_weights_path + "/"+self.gmodule._get_name()+'_FQ8weights.pth' if output_weights_path is not None else None
+            q8b_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
+            print("Finished Training 8bit Model...")
+            #DianaModule.plot_metrics(q8b_metrics ) 
+            
+        #Iteration 3 - Input HW specific quantisation, map scales 
+        self.map_scales(HW_Behaviour=True)
+      
+        if train_HWmapped_model:  
+            print("Training HW_Mapped Model...")
+           
+            self.configure_optimizer( lr = 0.04 , momentum=0.9,  weight_decay=1e-5 )
+            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQMappedweights.pth'   if output_weights_path is not None else None
+            qHW_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
+            #DianaModule.plot_metrics(qHW_metrics)
+            print("Finished Training HW_Mapped Model...")
+     
+             
+        #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
+        self.clip_scales_pow2() 
+        if train_HW_model: 
+            print("Training Final HW Model...")
+            self.configure_optimizer( lr = 0.04 , momentum=0.9,  weight_decay=1e-5 )
+            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQHWweights.pth' if output_weights_path is not None else None
+            qSc_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
+            #DianaModule.plot_metrics(qSc_metrics ) 
+            print("Finished Final HW Model...")
+        
+
+    def configure_optimizer(self, type : str = 'SGD' , *args , **kwargs):  # case sensitive 
+        my_module = importlib.import_module("torch.optim")
+        MyClass = getattr(my_module, type) 
+        self.optimizer = MyClass(self.gmodule.parameters() , *args, **kwargs) 
+    def initialize_quantization(self, count = 400): 
         self.gmodule = self.gmodule.to('cpu')
         self.start_observing()
-        # put 100 validation data sample through and initialize quantization hyperparameters 
+        # put count validation data samples through and initialize quantization hyperparameters 
         # do this in CPU 
-        for i in range(400): 
+        for i in range(count ): 
             idx  = randint(0 , self.validation_dataset['size'] -2 )
             x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
     
@@ -212,67 +258,5 @@ class DianaModule: # Base class for all diana models
                 _ = self.gmodule(x) 
         self.stop_observing() 
        
-        self.gmodule = nn.DataParallel(self.gmodule )
-    
         # return model to gpu for trianing 
         self.gmodule.to(DianaModule.device)
-        if train_8bit_model: 
-            print("Training 8bit Model...")
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.001 , momentum=0.9,  weight_decay=1e-5) 
-            
-            q8b_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, epochs, criterion, scheduler )
-            print("Finished Training 8bit Model...")
-            #DianaModule.plot_metrics(q8b_metrics ) 
-        if output_weights_path is not None : 
-            out_path = output_weights_path + "/"+self.gmodule._get_name()+'_FQ8weights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-            
-        #Iteration 3 - Input HW specific quantisation, map scales 
-        self.map_scales(HW_Behaviour=True)
-        #self.gmodule = self.gmodule.to('cpu')
-
-        #self.start_observing()
-        
-        ## put 100 validation data sample through and initialize quantization hyperparameters 
-        ## do this in CPU 
-        #for i in range(400): 
-            #idx  = randint(0 , self.validation_dataset['size'] -2 )
-            #x, _ = self.train_dataset['dataset'].__getitem__(idx) 
-    
-            #if len(x.shape) == 3 : 
-                #x = x.unsqueeze(0)
-                #_ = self.gmodule(x) 
-        
-        #self.stop_observing() 
-
-        ## return model to gpu
-        #self.gmodule = self.gmodule.to(DianaModule.device)
-        if train_HWmapped_model:  
-            print("Training HW_Mapped Model...")
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.04 , momentum=0.9,  weight_decay=1e-5)  
-            qHW_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, 20, criterion, scheduler )# for testing
-            #DianaModule.plot_metrics(qHW_metrics)
-            print("Finished Training HW_Mapped Model...")
-        if output_weights_path is not None : 
-            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQDianaweights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-             
-        #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
-        self.clip_scales_pow2() 
-        if train_HW_model: 
-            print("Training Final HW Model...")
-            optimizer = optim.SGD(self.gmodule.parameters() , lr = 0.04 , momentum=0.9,  weight_decay=1e-5)  
-            qSc_metrics =  DianaModule.train(self.gmodule, optimizer,data_loader, 20, criterion, scheduler )
-            #DianaModule.plot_metrics(qSc_metrics ) 
-            print("Finished Final HW Model...")
-        if output_weights_path is not None : 
-            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQHWweights.pth' 
-            torch.save(self.gmodule.state_dict(), out_path)
-            
-
-
-
-# write your own applier that is added in the end to replace first conv layer with digital conv and replace harmonise adds with a correct dianamodule 
-# Could write custom harmoniser or edit the harmoniser adds in the true quant step 
-
-
