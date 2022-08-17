@@ -22,20 +22,20 @@ train_scale = torch.Tensor([1/256])
 validation_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=True, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
 
 model = resnet20()
-weight_file = Path("trained_models/resnet20/ResNet_FPweights.pth")
+weight_file = Path("zoo/cifar10/resnet20/ResNet_FPweights.pth")
 model.load_state_dict(torch.load(str(weight_file.absolute())))
 model.eval()
 
-#converted = DianaModule.from_trained_fp_model(model ) 
-#for idx , module in enumerate(converted.modules()) : 
-#    print (f'{idx} ---->>>> {module}')
+converted = DianaModule.from_trained_model(model ) 
+for idx , module in enumerate(converted.modules()) : 
+    print (f'{idx} ---->>>> {module}')
 ##TRAINING
 
-converted = DianaModule(model)
-converted.attach_train_dataset(train_dataset , train_scale) 
-converted.attach_validation_dataset(validation_dataset, train_scale)
+#converted = DianaModule(model)
+#converted.attach_train_dataset(train_dataset , train_scale) 
+#converted.attach_validation_dataset(validation_dataset, train_scale)
 
 
-data_folder = Path("trained_models/resnet20")
-converted.QA_iterative_train(epochs=3, batch_size=128, train_FP_model=False , train_8bit_model=False , train_HWmapped_model=False ) 
+#data_folder = Path("trained_models/resnet20")
+#converted.QA_iterative_train(epochs=3, batch_size=128, train_FP_model=False , train_8bit_model=False , train_HWmapped_model=False ) 
 

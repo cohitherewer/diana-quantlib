@@ -14,7 +14,7 @@ from DianaModules.utils.onnx import DianaExporter
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
 from quantlib.editing.graphs.nn.harmonisedadd import HarmonisedAdd
-from .Editing import DianaF2FConverter, DianaF2TConverter
+from .Converters import DianaF2FConverter, DianaF2TConverter
 
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 import torch 

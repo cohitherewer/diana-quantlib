@@ -11,7 +11,7 @@ from DianaModules.utils.grapheditors import DianaAps
 from quantlib.editing.editing.editors.base.rewriter.applier import Applier
 from quantlib.editing.editing.editors.base.rewriter.finder import Finder
 from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
-from quantlib.editing.graphs import fx
+import torch.fx as fx
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QActivation
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 

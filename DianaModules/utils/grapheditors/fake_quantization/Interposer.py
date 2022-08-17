@@ -4,7 +4,7 @@ from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.editors.base.rewriter.applier import Applier
 from quantlib.editing.editing.editors.base.rewriter.finder import Finder
 from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
-from quantlib.editing.graphs import fx
+import torch.fx as fx
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 
 from DianaModules.core.Operations import DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d

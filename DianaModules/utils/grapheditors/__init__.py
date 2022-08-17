@@ -1,6 +1,6 @@
 
 from quantlib.editing.editing.editors.base.rewriter.applicationpoint import ApplicationPoint
-from quantlib.editing.graphs import fx
+import torch.fx as fx
 
 class _DianaNode:
     def __init__(self, type:str, node: fx.node.Node) -> None:

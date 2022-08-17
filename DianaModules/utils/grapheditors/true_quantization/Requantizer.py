@@ -8,7 +8,7 @@ from torch import nn
 
 from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
 from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
-from quantlib.editing.graphs import fx
+import torch.fx as fx
 from quantlib.editing.editing.editors.nnmodules.applicationpoint import NodesMap
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.factory import generate_named_patterns
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
