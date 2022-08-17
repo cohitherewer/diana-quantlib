@@ -40,7 +40,7 @@ class SIMDModel:
     @classmethod
     def _clip(cls, in_fmap, bw):  
         max_val = 2**(bw-1)-1
-        min_val = -2**(bw-1)+1 # TODO weird clipping bound. Ask about this 
+        min_val = -2**(bw-1)+1
         clip_min_mask = (in_fmap<min_val).astype(int)
         clip_max_mask = (in_fmap>max_val).astype(int)
         clip_min_mask_n = numpy.logical_xor(clip_min_mask, 1).astype(int)

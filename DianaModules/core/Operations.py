@@ -13,7 +13,7 @@ from quantlib.algorithms.qbase.qrange.qrange import resolve_qrangespec
 
 
 from quantlib.algorithms.qmodules.qmodules import  QIdentity
-from quantlib.algorithms.qmodules.qmodules.qactivations import QReLU
+
 
 from quantlib.algorithms.qmodules.qmodules.qlinears import QConv2d, QLinear 
 
@@ -23,6 +23,7 @@ from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHPa
 from DianaModules.utils._FakeQuantizer import _FakeDQuantiser, _FakeAQuantiser
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 from quantlib.algorithms.qbase import get_zero_scale, get_scale
+
 class DianaBaseOperation:   
     @abstractmethod
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): 
@@ -45,9 +46,21 @@ class DianaBaseOperation:
             self.zero.data.copy_(zero.to(device=self.scale.device))
             self.scale.data.copy_(scale.to(device=self.scale.device))
         self._set_clipping_bounds()
-    def get_bitwidth(self): 
-        pass
-
+    
+    def define_bitwidth_clipping(self): 
+        self.bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) )#quantized clip lo and high
+        self.bw_clip_hi =torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) )-1 
+        if len(self.clip_lo.shape ) > 3: 
+                for c in range(self.clip_lo.size(0)) : 
+                    if self.clip_lo[c][0][0][0] < 0 : 
+                        self.bw_clip_lo[c][0][0][0] =  -self.bw_clip_lo[c][0][0][0] 
+                      
+        else: 
+            if self.clip_lo < 0: 
+                self.bw_clip_lo = -self.bw_clip_lo 
+        if self.clip_lo < 0: 
+            self.bw_clip_lo = -self.bw_clip_lo + 1
+        
 class IdentityType(enum.Enum):  
     default = enum.auto() # 8 Bits 
     AIMC_IN= enum.auto() # 7 bits
@@ -65,18 +78,20 @@ class DIANALinear(QLinear , DianaBaseOperation):
                
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeDQuantiser.apply 
+    def stop_observing(self):
+        super().stop_observing()
+        self.define_bitwidth_clipping()
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        bw_clip_lo = 2**round(math.log2((abs(self.clip_lo)/ (self.scale * self.step)).item())) #quantized clip lo and high
-        bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
-        if self.clip_lo < 0: 
-            bw_clip_lo = -bw_clip_lo + 1
-        return self._qop(x, bw_clip_lo,bw_clip_hi, self.step, self.scale)
+        
+        return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
     
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
         else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})              
+            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})                     
+        self.define_bitwidth_clipping()
+
     def forward(self, x: torch.Tensor) : 
         x = x.to(self.weight.device)
         return super().forward(x) 
@@ -94,13 +109,12 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         self._type =  QuantizerType
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeDQuantiser.apply 
-
+    def stop_observing(self):
+        super().stop_observing()
+        self.define_bitwidth_clipping()
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        bw_clip_lo = 2**round(math.log2((abs(self.clip_lo)/ (self.scale * self.step)).item())) #quantized clip lo and high
-        bw_clip_hi =2**round(math.log2((abs(self.clip_hi)/ (self.scale * self.step)).item())) -1 
-        if self.clip_lo < 0: 
-            bw_clip_lo = -bw_clip_lo +1
-        return self._qop(x, bw_clip_lo,bw_clip_hi, self.step, self.scale)
+        
+        return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             if self._type == IdentityType.default: 
@@ -113,6 +127,7 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
                 self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+        self.define_bitwidth_clipping()
     def get_bitwidth(self):
         if self._type == IdentityType.default: 
             return 8 
@@ -138,6 +153,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
             self.freeze() 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+        self.define_bitwidth_clipping()
     
 
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
@@ -170,7 +186,9 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                          groups,
                          bias=bias) 
 
-          
+    def stop_observing(self):
+        super().stop_observing()
+        self.define_bitwidth_clipping()
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         if self.is_analog:
              self._qop = _FakeAQuantiser.apply
@@ -181,35 +199,23 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
         
         
         
-       
-        if self.scaled_mapped: # ternary: 
-            bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
-            bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device) 
-        else: 
-            bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) ).to(self.clip_lo.device)#quantized clip lo and high
-            bw_clip_hi = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) ).to(self.clip_lo.device) -1 
-            
-            if len(self.clip_lo.shape ) > 3: 
-                for c in range(self.clip_lo.size(0)) : 
-                    if self.clip_lo[c][0][0][0] < 0 : 
-                        bw_clip_lo[c][0][0][0] =  -bw_clip_lo[c][0][0][0] 
-                      
-            else: 
-                if self.clip_lo < 0: 
-                    bw_clip_lo = -bw_clip_lo 
+    
           
-        return self._qop(x, bw_clip_lo, bw_clip_hi, self.step, self.scale) 
+        return self._qop(x, self.bw_clip_lo, self.bw_clip_hi, self.step, self.scale) 
    
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             if (self.is_analog): 
                 self.redefine_qhparams('ternary')
-                self.scaled_mapped = True 
+                self.bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
+                self.bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device)  
+                return 
             else: 
                 self.redefine_qhparams({'bitwidth' : 8 , 'signed': True})   
 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
+        self.define_bitwidth_clipping()
     def forward(self, x: torch.Tensor) : 
         x = x.to(self.weight.device)
         return super().forward(x)

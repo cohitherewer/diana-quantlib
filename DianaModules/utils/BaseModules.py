@@ -200,7 +200,7 @@ class DianaModule: # Base class for all diana models
         if train_FP_model:  
             print("Training FP Model...")
             out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' if output_weights_path is not None else None
-            self.configure_optimizer('SGD' ,lr = 0.07 , momentum = 0.9, weight_decay=1e-4)
+            self.configure_optimizer('SGD' ,lr = 0.01 , momentum = 0.9, weight_decay=1e-5)
             FP_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
             print("Finished Training FP Model...")
             #DianaModule.plot_training_metrics(FP_metrics) 
@@ -210,7 +210,7 @@ class DianaModule: # Base class for all diana models
         self.initialize_quantization() 
         if train_8bit_model: 
             print("Training 8bit Model...")
-            self.configure_optimizer('SGD', lr = 0.001 , momentum=0.9,  weight_decay=1e-5)
+            self.configure_optimizer('SGD', lr = 0.04 , momentum=0.9,  weight_decay=1e-5)
             out_path = output_weights_path + "/"+self.gmodule._get_name()+'_FQ8weights.pth' if output_weights_path is not None else None
             q8b_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
             print("Finished Training 8bit Model...")
