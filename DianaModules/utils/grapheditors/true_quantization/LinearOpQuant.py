@@ -17,6 +17,11 @@ from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.fake2true.integerisation.linearopintegeriser.finder import LinearOpIntegeriserMatcher
 from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.modulewisedescription.nametomodule.nametomodule import NameToModule
 #region LinearOpIntegrizer
+
+# Integrizer for qlinear and dianaconv that's only digtial - 8 bit 
+
+
+
 SUPPORTED_LINEAR_FPMODULES = (nn.Linear , nn.Conv2d) 
 
 class DianaLinearOpIntegrizerApplier(NNModuleApplier): 
@@ -101,6 +106,7 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
 
 ##################### DEFINING VARS #########################
 checker =( lambda m: True , ) 
+analog_checker =( lambda m: False if m.is_anlog else True  , ) 
 di_roles = Roles([
 
     ('eps_in',  Candidates([
@@ -109,7 +115,7 @@ di_roles = Roles([
 
     ('linear', Candidates([
         ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True}, checkers=checker)) , 
-        ('QConv2d', NNModuleDescription(class_=nn.Conv2d , kwargs={'in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}, checkers=checker))
+        ('QConv2d', NNModuleDescription(class_=nn.Conv2d , kwargs={'in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}, checkers=analog_checker))
     ])),
 
     ('eps_out', Candidates([

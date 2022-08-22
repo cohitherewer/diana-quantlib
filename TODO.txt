@@ -1,0 +1,4 @@
+Right now the comoputational graph is traveresed for every editor. This is widely inefficient. To fix this, the composed editor structure needs to be change. Each node should have annotations that specify the editos that will apply changes to it in sequential editor. in this way, you can imagine we have one big Finder and one big Applier that is composed of all the editors in our application 
+
+
+analog conv: bias of VGS affects current ( saturation for + and - values and both are done seperately ) 

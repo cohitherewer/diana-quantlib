@@ -54,7 +54,7 @@ class DianaOpQuantApplier(Applier):
             type_out = IdentityType.AIMC_OUT #uncomment later when using analog core 
         qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_in)
         qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'minmax', type_out) if type_out == IdentityType.AIMC_OUT else None
- 
+        
         pre_target = id_ 
         
         
