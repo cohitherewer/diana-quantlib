@@ -32,13 +32,13 @@ analog_roles  = Roles([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
      ('identity', Candidates([
-        ('QIdentity', NNModuleDescription(class_=nn.Identity)),
+        ('QIdentity', NNModuleDescription(class_=nn.Identity, kwargs={})),
     ])),
      ('eps_identity_out', Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
     ('accumulator', Candidates([
-        ('Accumulator', NNModuleDescription(class_=Accumulator)),
+        ('Accumulator', NNModuleDescription(class_=Accumulator, kwargs={})),
     ])),
     ('eps_out', Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
@@ -49,8 +49,22 @@ class AnalogConvIntegrizerApplier(Applier) :
     def __init__(self):
         super().__init__()
     @classmethod 
-    def create_torch_module(module : AnalogConv2d, *args) :  
-        pass 
+    def create_torch_module(qconv : AnalogConv2d, ) :  
+        assert isinstance(qconv, AnalogConv2d)  
+        new_module = nn.Conv2d(in_channels=qconv.in_channels,
+                                out_channels=qconv.out_channels,
+                                kernel_size=qconv.kernel_size,
+                                stride=qconv.stride,
+                                padding=qconv.padding,
+                                dilation=qconv.dilation,
+                                groups=qconv.groups,
+                                bias=False)
+        new_module.weight.data = torch.round(qconv.weight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
+        new_module.register_buffer("is_analog" , torch.Tensor([True])) 
+        new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
+        new_module.gain.data = qconv.gain.data.clone().detach() 
+        return new_module
+        
 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
         # get handles on matched `fx.Node`s
@@ -72,9 +86,7 @@ class AnalogConvIntegrizerApplier(Applier) :
         module_identity_out= name_to_match_node['eps_identity_out'] # should have same eps in as node_conv_out epsout
         module_accumulator  = name_to_match_node['accumulator']
         module_eps_out = name_to_match_node['eps_out']
-        if not issubclass(type(module_conv) , _QModule): 
-            # already edited. node might be returned multiple times due to nn.sequential 
-            return g 
+    
          # create the integerised linear operation
         new_target = id_
         new_module = AnalogConvIntegrizerApplier.create_torch_module(module_conv)
@@ -84,11 +96,22 @@ class AnalogConvIntegrizerApplier(Applier) :
         
         with g.graph.inserting_after(node_eps_in):
             new_node = g.graph.call_module(new_target, args=(node_eps_in,))
-        node_eps_out.replace_input_with(node_accumulator, new_node)
-       
+        node_conv_out.replace_input_with(node_conv, new_node)
+        acc_users = [u for u in node_accumulator.users] 
+        for u in acc_users: 
+            u.replace_input_with(node_accumulator , node_identity_out)
+
+         # TODO ...and delete conv and accumulator opertions , set epstunnels of eps_identity_out eps_out to 1 and eps_out eps_in to 1
         module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
-        module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
-         # TODO ...and delete all the old operations
+        module_conv_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
+        module_identity_out.set_eps_out(torch.ones_like(module_identity_out.eps_out)) 
+        module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in)) 
+
+         # ...and delete the old operation
+        g.delete_submodule(node_conv.target)
+        g.graph.erase_node(node_conv)
+        g.delete_submodule(node_accumulator.target)
+        g.graph.erase_node(node_accumulator)
        
         return g
 
@@ -101,8 +124,8 @@ class AnalogConvIntegrizer(ComposedEditor):
         editors : List[Editor]
         editors =[]
         for name, pattern in generate_named_patterns(analog_roles, admissible_screenplays):
-            class_name = name + 'DianaIntegeriser'
-            class_ = get_rewriter_class(class_name, pattern, LinearOpIntegeriserMatcher, DianaLinearOpIntegrizerApplier)
+            class_name = name + 'DianaAnalogIntegeriser'
+            class_ = get_rewriter_class(class_name, pattern, LinearOpIntegeriserMatcher, AnalogConvIntegrizerApplier)
             editors.append(class_())
         super().__init__(editors)
     pass 

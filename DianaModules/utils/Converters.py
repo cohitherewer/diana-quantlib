@@ -1,7 +1,9 @@
-from typing import List
+from typing import List, Tuple
 
 from DianaModules.utils.grapheditors.fake_quantization.ActFuser import DianaQuantizerFuser
+from DianaModules.utils.grapheditors.fake_quantization.AnalogConv import AnalogConvMapper
 from DianaModules.utils.grapheditors.fake_quantization.Interposer import DianaF2FInterposer
+from DianaModules.utils.grapheditors.true_quantization.AnalogCoreOperation import AnalogConvIntegrizer
 from DianaModules.utils.grapheditors.true_quantization.LinearOpQuant import DianaLinearOpIntegrizer
 from DianaModules.utils.grapheditors.true_quantization.Requantizer import DianaRequantizer
 
@@ -36,7 +38,8 @@ class DianaF2FConverter(ComposedEditor):
     def __init__(self,
                  modulewisedescriptionspec:   ModuleWiseDescriptionSpecType,
                  addtreeqdescriptionspec:     QDescriptionSpecType,
-                 addtreeforceoutputeps:       bool,
+                 analogcoredescriptionspec : Tuple[str , ...]  ,
+                 addtreeforceoutputeps:       bool = False ,
              ):
 
         super(DianaF2FConverter, self).__init__([
@@ -45,7 +48,9 @@ class DianaF2FConverter(ComposedEditor):
             DianaF2FQuantiser(
                 modulewisedescriptionspec,
                 addtreeqdescriptionspec,
-                addtreeforceoutputeps,
+                analogcoredescriptionspec, 
+                addtreeforceoutputeps
+                
             )
          
         ])
@@ -56,6 +61,7 @@ class DianaF2FQuantiser(ComposedEditor):
     def __init__(self,
                  modulewisedescriptionspec:   ModuleWiseDescriptionSpecType,
                  addtreeqdescriptionspec:     QDescriptionSpecType,
+                analogcoredescriptionspec : Tuple [str , ...], 
                  addtreeforceoutputeps:       bool,
                  ):
       
@@ -64,7 +70,7 @@ class DianaF2FQuantiser(ComposedEditor):
             
             ModuleWiseConverter(modulewisedescriptionspec),
        
-           
+            AnalogConvMapper(analogcoredescriptionspec) , 
             
             DianaF2FInterposer()  ,  
         
@@ -89,7 +95,7 @@ class DianaF2TConverter(ComposedEditor) :
           
             F2TAnnotator(),
             EpsTunnelInserter(),
-         
+            AnalogConvIntegrizer() ,
             DianaLinearOpIntegrizer(), 
          
             DianaRequantizer()]

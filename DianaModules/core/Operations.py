@@ -1,6 +1,7 @@
 
 from abc import abstractmethod
 import enum
+from random import randint
 from turtle import forward
 import torch 
 from torch import Tensor, nn
@@ -84,7 +85,8 @@ class DIANALinear(QLinear , DianaBaseOperation):
         super().stop_observing()
         self.define_bitwidth_clipping()
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        
+        self.bw_clip_hi = self.bw_clip_hi.to(self.scale.device) 
+        self.bw_clip_lo = self.bw_clip_lo.to(self.scale.device) 
         return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
     
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
@@ -115,7 +117,9 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         super().stop_observing()
         self.define_bitwidth_clipping()
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        
+        self.bw_clip_hi =self.bw_clip_hi.to(x.device) 
+        self.bw_clip_lo= self.bw_clip_lo.to(x.device) 
+    
         return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
@@ -199,7 +203,9 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
  
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         
-
+        
+        self.bw_clip_hi = self.bw_clip_hi.to(x.device) 
+        self.bw_clip_lo = self.bw_clip_lo.to(x.device) 
         return self._qop(x, self.bw_clip_lo, self.bw_clip_hi, self.step, self.scale) 
    
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
@@ -223,18 +229,25 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
 # Analog Core Conv Operation: DAC , noise ,  split channels conv ,  quantize , then accumulate 
 class AnalogConv2d(DIANAConv2d): 
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, in_channels: int, out_channels: int, kernel_size: int, stride: Tuple[int, ...] = 1, padding: str = 0, dilation: Tuple[int, ...] = 1, array_size : int = 1152):
-        self.max_channels = math.floor(array_size/kernel_size *kernel_size)
+        
+        if isinstance(kernel_size , Tuple): 
+            k_size = kernel_size[0] * kernel_size[1] 
+        else: 
+            k_size = kernel_size**2 
+        self.max_channels = math.floor(array_size/k_size)
         assert self.max_channels >= 1 , f"Array size must be at least kernel_size * kernel_size: {kernel_size**2}"
-        self.gain = 1 # Analog domain gain from Vgs 
-        self.out_H = None # saving to not keep recomputing in forward pass 
-        self.out_W = None # saving to not keep recomputing in forward pass 
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels, out_channels, kernel_size, stride, padding, dilation, bias=False)
+        self.gain = nn.Parameter(torch.rand(math.ceil(in_channels/self.max_channels))*4)# Analog domain gain from Vgs 
+        self.out_H = None # saving to not keep recomputing in forward pass 
+        self.out_W = None # saving to not keep recomputing in forwar*d pass 
+        
 
     def forward(self, x : torch.Tensor) : # returns a five dimensionsal tensor 
         x.to(self.weight.device) 
+        
         group_count = 1 if self.max_channels >= x.size(1) else math.ceil(x.size(1)/self.max_channels) 
         counter = x.size(1) 
-        tile_size = x.size(1) if group_count > 1 else self.max_channels
+        tile_size = x.size(1) if group_count <= 1 else self.max_channels
         padded_out = None
         if self._is_quantised:
             weight = self.qweight
@@ -246,52 +259,72 @@ class AnalogConv2d(DIANAConv2d):
         padding = self.padding
         stride = self.stride
         for i in range(group_count): # chance for parallelization across distributed loads 
-            group_passed = x[: , x.size(1)*(i):tile_size, : , : ] 
-            
             ##### TWO LINE CONVOLUTION #####
+            group_passed = x[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ] 
+            pass_weight = weight[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ]  * self.gain[i] 
+            
             
             feature_map_batch_size = group_passed.size(0) 
             
             flattened_feature_map = torch.nn.functional.unfold(group_passed ,kernel_size =self.kernel_size,stride=self.stride , padding=self.padding ).unsqueeze(1) # 
             flattened_feature_map = flattened_feature_map.expand(feature_map_batch_size , kernel_count , flattened_feature_map.size(2) , flattened_feature_map.size(3) )
-            print(flattened_feature_map.shape)
-            flattened_kernel = weight.view(weight.size(0), -1).unsqueeze(0).expand(feature_map_batch_size , kernel_count , -1).unsqueeze(3).expand(feature_map_batch_size,kernel_count, flattened_feature_map.size(2), flattened_feature_map.size(3))
+           
+            flattened_kernel = pass_weight.view(pass_weight.size(0), -1).unsqueeze(0).expand(feature_map_batch_size , kernel_count , -1).unsqueeze(3).expand(feature_map_batch_size,kernel_count, flattened_feature_map.size(2), flattened_feature_map.size(3))
 
             flattened_out = flattened_kernel * flattened_feature_map
-            out_H = int((feature_map_H-self.kernel_size+2* padding)/stride+1 ) if self.out_H is None else self.out_H
-            out_W = int((feature_map_W-self.kernel_size+2* padding)/stride+1 ) if self.out_W is None else self.out_W 
+            out_H = int((feature_map_H-self.kernel_size[0]+2* padding[0])/stride[0]+1 ) if self.out_H is None else self.out_H
+            out_W = int((feature_map_W-self.kernel_size[1]+2* padding[1])/stride[1]+1 ) if self.out_W is None else self.out_W 
 
-            negative_mask = flattened_out <0
+            #negative_mask = flattened_out <0
 
 
             negative_clip = -10 
             positive_clip = 10
-
-            negative_out = torch.max(torch.sum(flattened_out*negative_mask , 2)  , negative_clip) 
-            positive_out = torch.min(torch.sum(flattened_out*~negative_mask , 2), positive_clip) 
-
-            conv_out = (negative_out + positive_out).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
+            
+            negative_out = torch.clamp(torch.sum(torch.minimum(flattened_out,torch.Tensor([0]).to(x.device)) , 2)  , min=negative_clip) 
+            positive_out = torch.clamp(torch.sum(torch.maximum(flattened_out, torch.Tensor([0]).to(x.device)) , 2), max=positive_clip) 
+         
+            #conv_out = (negative_out + positive_out).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
 
 
             ##### TWO LINE CONVOLUTION END #####
             #conv_out = super().forward(group_passed) 
             if padded_out is None:            
-                padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2)  ,conv_out.size(3)  ).to(self.weight.device) 
-                self.out_W = conv_out.size(3) 
-                self.out_H = conv_out.size(2) 
+                padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , out_H ,out_W  ).to(self.weight.device) 
+                
 
-            padded_out[i,:, :conv_out.size(1), : , : ] = conv_out
-            counter -= tile_size 
+            padded_out[i,:, :, : , : ] = (negative_out + positive_out).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
+            counter = counter - tile_size 
             if counter < self.max_channels: 
                 tile_size = counter # remaining 
         return padded_out
-        
+
+    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
+        if HW_Behaviour: 
+            self.redefine_qhparams('ternary')
+            self.bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
+            self.bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device)  
+            return
+        else : 
+            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
+        self.define_bitwidth_clipping() 
  
-class AnalogOutIdentity(DIANAIdentity):  ## keeping an observer for  each of the groups except the last one ( because it might be padded with zeros and might affect the statistics). In the end fuse the observer statistics 
+class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass randomly sample a group and observe it
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, IdentityType.AIMC_OUT)
+
     def forward(self, x : torch.Tensor):
-        pass 
+        if self._is_observing:
+            with torch.no_grad():
+                i = randint(0, x.size(0) -1 ) 
+                self._observer.update(x[i])
+
+        if self._is_quantised:
+            x = self._call_qop(x)
+        else:
+            x = super(_QModule, self).forward(x)
+
+        return x 
         
 #(Partial sum ) 
 class Accumulator(nn.Module): # given a five dimensional tensor return a reduced accumulated 4d tensor 

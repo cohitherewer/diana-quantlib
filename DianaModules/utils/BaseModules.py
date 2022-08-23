@@ -75,16 +75,16 @@ class DianaModule: # Base class for all diana models
             ({'types': ( 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
             ({'types': ( 'Linear' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
+        analogcoredescriptionspec =  ('per-array', {'bitwidth': 8, 'signed': True} , 'meanstd')
             
         # `AddTreeHarmoniser` argument
         addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA')
-        addtreeforceoutputeps =  False # set to false because each module quantizes the input differently 
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
         converter  =  DianaF2FConverter(
             modulewisedescriptionspec,
             addtreeqdescriptionspec,
-            addtreeforceoutputeps
+            analogcoredescriptionspec
         )
       
         converted_graph =converter(graph) 
@@ -160,17 +160,21 @@ class DianaModule: # Base class for all diana models
                         with torch.no_grad(): 
                             yhat = model(x)
                             loss = criterion(yhat, y) 
+                            print(f"{stage} .. finished forward pass batch i ")
                     else: 
                         with torch.set_grad_enabled(True):
                             yhat = model(x) 
+                            print(f"{stage} .. finished forward pass batch {i} ")
                             loss = criterion(yhat, y) 
                             loss.backward() 
+                            print(f"{stage} .. finished backward pass batch {i} ")
                             optimizer.step() 
                     
                     predictions = torch.argmax(yhat , 1)
 
                     running_loss += loss.item() *x.size(0) 
                     running_correct += torch.sum(predictions==y) .item()
+                    
          
                 e_loss = running_loss / len(data_loader[stage].dataset)
                 e_acc = running_correct / len(data_loader[stage].dataset) 
@@ -207,7 +211,8 @@ class DianaModule: # Base class for all diana models
                  
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f 
-        self.initialize_quantization() 
+        self.initialize_quantization(5) 
+        self.gmodule.to(DianaModule.device)
         if train_8bit_model: 
             print("Training 8bit Model...")
             self.configure_optimizer('SGD', lr = 0.04 , momentum=0.9,  weight_decay=1e-5)

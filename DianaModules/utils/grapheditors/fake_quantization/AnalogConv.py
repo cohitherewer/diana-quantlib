@@ -1,6 +1,7 @@
 
 from imp import new_module
-from typing import List
+from pydoc import describe
+from typing import List, Tuple
 from DianaModules.core.Operations import Accumulator, AnalogConv2d, DIANAConv2d
 from DianaModules.utils.grapheditors import DianaAps
 from quantlib.editing.editing.editors.base.rewriter.applier import Applier
@@ -32,24 +33,29 @@ class AnalogConvFinder(Finder) :
         return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
 
 class AnalogConvApplier(Applier) : 
-    def __init__(self):
+    def __init__(self, description : Tuple[str , ...]): 
+        self.spec = description
         super().__init__()
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
         #  add accumulator         
         node = ap.node 
+        conv_module =g.get_submodule(node.target)
         accumulator_node = None
         users = [u for u in node.users] 
         accum_target = id_ 
         accumulator = Accumulator() 
         g.add_submodule(accum_target , accumulator)
+        
         with g.graph.inserting_after(node) : 
-            accumulator_node = g.graph.call_module(accumulator , args=(ap.node,))
+            accumulator_node = g.graph.call_module(accum_target , args=(node,))
         for u in users: 
             u.replace_input_with(node ,accumulator_node )
         # replace DIANAConv2d with AnalogConv2D
         prev_module = g.get_submodule(node.target) 
-
-        analog_module = AnalogConv2d() #initialize the analog conv2d operation 
+        qgranularity = self.spec[0]
+        qrange = self.spec[1]
+        qhparaminitstrat = self.spec[2]
+        analog_module = AnalogConv2d(qrangespec=qrange , qgranularityspec=qgranularity , qhparamsinitstrategyspec=qhparaminitstrat , in_channels=conv_module.in_channels , out_channels=conv_module.out_channels , kernel_size=conv_module.kernel_size , stride = conv_module.stride , padding=conv_module.padding , dilation=conv_module.dilation) #initialize the analog conv2d operation 
         #replace it 
         name_to_module = NameToModule(g.named_modules())
         name_to_module[node.target] = analog_module
@@ -59,7 +65,7 @@ class AnalogConvApplier(Applier) :
         return g
 
 class AnalogConvMapper(Rewriter) : 
-    def __init__(self, name: str):
+    def __init__(self ,analogconvdescriptionspec):
         finder = AnalogConvFinder() 
-        applier = AnalogConvApplier() 
-        super().__init__(name, quantlib_symbolic_trace, finder, applier)
+        applier = AnalogConvApplier(description=analogconvdescriptionspec) 
+        super().__init__("AnalogConvMapper", quantlib_symbolic_trace, finder, applier)

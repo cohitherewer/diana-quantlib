@@ -7,7 +7,7 @@ from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 import torch.fx as fx
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 
-from DianaModules.core.Operations import DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
+from DianaModules.core.Operations import AnalogOutIdentity, DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
 
 
 MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear]
@@ -53,7 +53,7 @@ class DianaOpQuantApplier(Applier):
             type_in = IdentityType.AIMC_IN
             type_out = IdentityType.AIMC_OUT #uncomment later when using analog core 
         qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_in)
-        qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'minmax', type_out) if type_out == IdentityType.AIMC_OUT else None
+        qpost = AnalogOutIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'minmax', type_out) if type_out == IdentityType.AIMC_OUT else None
         
         pre_target = id_ 
         
