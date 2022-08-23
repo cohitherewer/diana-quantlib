@@ -18,5 +18,5 @@ diana_model.attach_train_dataset(train_dataset , train_scale)
 diana_model.attach_validation_dataset(validation_dataset, train_scale)
 
 data_folder = Path("zoo/cifar10/resnet8_mixed_new")
-diana_model.QA_iterative_train(epochs=1, batch_size=16, train_FP_model=False, output_weights_path=str(data_folder.absolute())) 
+diana_model.QA_iterative_train(epochs=1, batch_size=128, train_FP_model=False, output_weights_path=str(data_folder.absolute())) 
 

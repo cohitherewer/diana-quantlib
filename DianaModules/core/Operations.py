@@ -258,42 +258,22 @@ class AnalogConv2d(DIANAConv2d):
         kernel_count = self.out_channels
         padding = self.padding
         stride = self.stride
+        negative_x = torch.minimum(x,torch.Tensor([0]).to(x.device)) 
+        positive_x= torch.maximum(x,torch.Tensor([0]).to(x.device)) 
+        feature_map_batch_size = x.size(0) 
+        ls = [negative_x , positive_x ]
+        clipping = [-10,10] 
         for i in range(group_count): # chance for parallelization across distributed loads 
             ##### TWO LINE CONVOLUTION #####
-            group_passed = x[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ] 
-            pass_weight = weight[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ]  * self.gain[i] 
-            
-            
-            feature_map_batch_size = group_passed.size(0) 
-            
-            flattened_feature_map = torch.nn.functional.unfold(group_passed ,kernel_size =self.kernel_size,stride=self.stride , padding=self.padding ).unsqueeze(1) # 
-            flattened_feature_map = flattened_feature_map.expand(feature_map_batch_size , kernel_count , flattened_feature_map.size(2) , flattened_feature_map.size(3) )
-           
-            flattened_kernel = pass_weight.view(pass_weight.size(0), -1).unsqueeze(0).expand(feature_map_batch_size , kernel_count , -1).unsqueeze(3).expand(feature_map_batch_size,kernel_count, flattened_feature_map.size(2), flattened_feature_map.size(3))
-
-            flattened_out = flattened_kernel * flattened_feature_map
-            out_H = int((feature_map_H-self.kernel_size[0]+2* padding[0])/stride[0]+1 ) if self.out_H is None else self.out_H
-            out_W = int((feature_map_W-self.kernel_size[1]+2* padding[1])/stride[1]+1 ) if self.out_W is None else self.out_W 
-
-            #negative_mask = flattened_out <0
-
-
-            negative_clip = -10 
-            positive_clip = 10
-            
-            negative_out = torch.clamp(torch.sum(torch.minimum(flattened_out,torch.Tensor([0]).to(x.device)) , 2)  , min=negative_clip) 
-            positive_out = torch.clamp(torch.sum(torch.maximum(flattened_out, torch.Tensor([0]).to(x.device)) , 2), max=positive_clip) 
-         
-            #conv_out = (negative_out + positive_out).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
-
-
-            ##### TWO LINE CONVOLUTION END #####
+            for forward_tensor  in ls: 
+                group_passed = forward_tensor[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ] 
+                pass_weight = weight[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ]  * self.gain[i]               
+                conv_out = torch.clamp(torch.nn.functional.conv2d(group_passed , pass_weight,stride =stride , padding=padding ,dilation=self.dilation, groups=self.groups) , min=clipping[0] , max = clipping[1]) 
+                ##### TWO LINE CONVOLUTION END #####
             #conv_out = super().forward(group_passed) 
-            if padded_out is None:            
-                padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , out_H ,out_W  ).to(self.weight.device) 
-                
-
-            padded_out[i,:, :, : , : ] = (negative_out + positive_out).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
+                if padded_out is None:            
+                    padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
+                padded_out[i,:, :, : , : ] += conv_out
             counter = counter - tile_size 
             if counter < self.max_channels: 
                 tile_size = counter # remaining 

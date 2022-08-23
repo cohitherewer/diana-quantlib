@@ -160,14 +160,14 @@ class DianaModule: # Base class for all diana models
                         with torch.no_grad(): 
                             yhat = model(x)
                             loss = criterion(yhat, y) 
-                            print(f"{stage} .. finished forward pass batch i ")
+                        
                     else: 
                         with torch.set_grad_enabled(True):
                             yhat = model(x) 
-                            print(f"{stage} .. finished forward pass batch {i} ")
+                
                             loss = criterion(yhat, y) 
                             loss.backward() 
-                            print(f"{stage} .. finished backward pass batch {i} ")
+                      
                             optimizer.step() 
                     
                     predictions = torch.argmax(yhat , 1)
