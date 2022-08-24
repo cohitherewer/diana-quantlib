@@ -64,7 +64,7 @@ class DianaF2FQuantiser(ComposedEditor):
                 analogcoredescriptionspec : Tuple [str , ...], 
                  addtreeforceoutputeps:       bool,
                  ):
-      
+       
         super(DianaF2FQuantiser, self).__init__([
             QuantLibRetracer(),
             

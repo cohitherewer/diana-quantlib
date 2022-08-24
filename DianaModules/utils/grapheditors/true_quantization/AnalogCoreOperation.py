@@ -3,7 +3,7 @@
 from typing import List
 import torch 
 from torch import nn 
-from DianaModules.core.Operations import Accumulator, AnalogConv2d
+from DianaModules.core.Operations import AnalogAccumulator, AnalogConv2d
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.editors.base.editor import Editor
@@ -38,7 +38,7 @@ analog_roles  = Roles([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
     ('accumulator', Candidates([
-        ('Accumulator', NNModuleDescription(class_=Accumulator, kwargs={})),
+        ('Accumulator', NNModuleDescription(class_=AnalogAccumulator, kwargs={})),
     ])),
     ('eps_out', Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),

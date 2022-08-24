@@ -211,7 +211,7 @@ class DianaModule: # Base class for all diana models
                  
         #Iteration 2 - Fake Quantistion all to 8 bit 
         self.gmodule = DianaModule.from_trained_model(self.gmodule) #f2f 
-        self.initialize_quantization(5) 
+        self.initialize_quantization() 
         self.gmodule.to(DianaModule.device)
         if train_8bit_model: 
             print("Training 8bit Model...")

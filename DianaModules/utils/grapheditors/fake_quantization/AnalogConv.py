@@ -2,7 +2,7 @@
 from imp import new_module
 from pydoc import describe
 from typing import List, Tuple
-from DianaModules.core.Operations import Accumulator, AnalogConv2d, DIANAConv2d
+from DianaModules.core.Operations import AnalogAccumulator, AnalogConv2d, AnalogGaussianNoise, DIANAConv2d
 from DianaModules.utils.grapheditors import DianaAps
 from quantlib.editing.editing.editors.base.rewriter.applier import Applier
 from quantlib.editing.editing.editors.base.rewriter.finder import Finder
@@ -37,21 +37,27 @@ class AnalogConvApplier(Applier) :
         self.spec = description
         super().__init__()
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
-        #  add accumulator         
+        #  add  gaussian noise  ,accumulator &
         node = ap.node 
         conv_module =g.get_submodule(node.target)
         accumulator_node = None
         users = [u for u in node.users] 
-        accum_target = id_ 
-        accumulator = Accumulator() 
-        g.add_submodule(accum_target , accumulator)
         
-        with g.graph.inserting_after(node) : 
-            accumulator_node = g.graph.call_module(accum_target , args=(node,))
+        accum_target = id_ 
+        accumulator = AnalogAccumulator() 
+        noise_target = id_ + f'[{str(self._counter)}]'
+        noise_module = AnalogGaussianNoise() 
+        g.add_submodule(accum_target , accumulator)
+        g.add_submodule(noise_target, noise_module)
+        # add noise 
+        with g.graph.inserting_after(node): 
+            noise_node = g.graph.call_module(noise_target , args=(node, ))  
+        with g.graph.inserting_after(noise_node) : 
+            accumulator_node = g.graph.call_module(accum_target , args=(noise_node,))
         for u in users: 
             u.replace_input_with(node ,accumulator_node )
         # replace DIANAConv2d with AnalogConv2D
-        prev_module = g.get_submodule(node.target) 
+     
         qgranularity = self.spec[0]
         qrange = self.spec[1]
         qhparaminitstrat = self.spec[2]

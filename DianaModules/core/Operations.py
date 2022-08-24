@@ -61,8 +61,8 @@ class DianaBaseOperation:
         else: 
             if self.clip_lo < 0: 
                 self.bw_clip_lo = -self.bw_clip_lo 
-        if self.clip_lo < 0: 
-            self.bw_clip_lo = -self.bw_clip_lo + 1
+        if self.clip_lo < 0: # TODO  for now just leave this so low clipping bound is -127  , implement this later specifically for simd model 
+            self.bw_clip_lo = -self.bw_clip_lo #+ 1
         
 class IdentityType(enum.Enum):  
     default = enum.auto() # 8 Bits 
@@ -163,7 +163,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     
 
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
-class DIANAConv2d(QConv2d , DianaBaseOperation):
+class DIANAConv2d(QConv2d , DianaBaseOperation): #digital core 
     
     def __init__(self,
                  qrangespec:               QRangeSpecType,
@@ -179,7 +179,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
                  bias : bool = False 
                  ):
                     self.is_analog = not bias # In linearopbn cannonocalisation the bias is set to none if bn follows conv 
-                    self.scaled_mapped=False #TODO change this later
+         
                     super().__init__(qrangespec,
                          qgranularityspec,
                          qhparamsinitstrategyspec,
@@ -210,20 +210,11 @@ class DIANAConv2d(QConv2d , DianaBaseOperation):
    
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
-            if (self.is_analog): 
-                self.redefine_qhparams('ternary')
-                self.bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
-                self.bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device)  
-                return 
-            else: 
-                self.redefine_qhparams({'bitwidth' : 8 , 'signed': True})   
-
+            self.redefine_qhparams({'bitwidth' : 8 , 'signed': True})   
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
         self.define_bitwidth_clipping()
    
-
-
 
 
 # Analog Core Conv Operation: DAC , noise ,  split channels conv ,  quantize , then accumulate 
@@ -253,27 +244,15 @@ class AnalogConv2d(DIANAConv2d):
             weight = self.qweight
         else:
             weight = self.weight
-        feature_map_H = x.size(2)  
-        feature_map_W = x.size(3) 
-        kernel_count = self.out_channels
-        padding = self.padding
-        stride = self.stride
-        negative_x = torch.minimum(x,torch.Tensor([0]).to(x.device)) 
-        positive_x= torch.maximum(x,torch.Tensor([0]).to(x.device)) 
-        feature_map_batch_size = x.size(0) 
-        ls = [negative_x , positive_x ]
-        clipping = [-10,10] 
+       
         for i in range(group_count): # chance for parallelization across distributed loads 
-            ##### TWO LINE CONVOLUTION #####
-            for forward_tensor  in ls: 
-                group_passed = forward_tensor[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ] 
-                pass_weight = weight[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ]  * self.gain[i]               
-                conv_out = torch.clamp(torch.nn.functional.conv2d(group_passed , pass_weight,stride =stride , padding=padding ,dilation=self.dilation, groups=self.groups) , min=clipping[0] , max = clipping[1]) 
-                ##### TWO LINE CONVOLUTION END #####
-            #conv_out = super().forward(group_passed) 
-                if padded_out is None:            
-                    padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
-                padded_out[i,:, :, : , : ] += conv_out
+            
+            group_passed = x[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ] 
+            pass_weight = weight[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ]
+            conv_out = nn.functional.conv2d(group_passed , pass_weight , stride = self.stride , ) 
+            if padded_out is None:            
+                padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
+            padded_out[i,:, :, : , : ] = conv_out
             counter = counter - tile_size 
             if counter < self.max_channels: 
                 tile_size = counter # remaining 
@@ -289,13 +268,14 @@ class AnalogConv2d(DIANAConv2d):
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
         self.define_bitwidth_clipping() 
  
-class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass randomly sample a group and observe it
+class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass randomly sample a group (except the last one ) and observe it
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, IdentityType.AIMC_OUT)
 
     def forward(self, x : torch.Tensor):
         if self._is_observing:
             with torch.no_grad():
+      
                 i = randint(0, x.size(0) -1 ) 
                 self._observer.update(x[i])
 
@@ -307,14 +287,34 @@ class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass r
         return x 
         
 #(Partial sum ) 
-class Accumulator(nn.Module): # given a five dimensional tensor return a reduced accumulated 4d tensor 
+class AnalogAccumulator(nn.Module): # given a five dimensional tensor return a reduced accumulated 4d tensor 
     def __init__(self) -> None:
         super().__init__()
     def forward(self , x: torch.Tensor) : 
         return torch.sum(x , 0) 
 
-class GaussianNoise(nn.Module) : 
-    def __init__(self) -> None:
-        super().__init__()
-    def forward(self , x: torch.Tensor) : 
-        pass 
+class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
+    def __init__(self ,signed , bitwidth,  mu_percentage = 0.04 , sigma_percentage= 0.015) : 
+        range =2**bitwidth  
+        self.signed = signed
+        self.mu = torch.Tensor([range * mu_percentage ])
+        self.sigma = torch.Tensor([range * sigma_percentage]) 
+        if signed: 
+            self.mu /= 2 
+            self.sigma /= 2  
+            self.clip_lo = torch.Tensor([-2**(bitwidth-1)])
+            self.clip_hi = -self.clip_lo + 1 
+        else : 
+            self.clip_lo = torch.Tensor([0])
+            self.clip_hi = torch.Tensor([2**bitwidth]) -1 
+        self.enable = False 
+
+    def enable(self): 
+        self.enable = True 
+    def forward(self , x : torch.Tensor) : 
+        if self.enable: 
+            with torch.no_grad: 
+                sign_coeff = torch.round(torch.rand_like(x)) # 50 % random sign 
+                noise_add = torch.randn_like(x) * self.sigma + sign_coeff*self.mu   #
+                return torch.clamp(x + noise_add , self.clip_lo , self.clip_hi ) 
+        return x

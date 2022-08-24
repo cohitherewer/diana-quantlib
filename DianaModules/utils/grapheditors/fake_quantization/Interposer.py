@@ -7,10 +7,10 @@ from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 import torch.fx as fx
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 
-from DianaModules.core.Operations import AnalogOutIdentity, DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
+from DianaModules.core.Operations import AnalogAccumulator, AnalogConv2d, AnalogOutIdentity, DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
 
 
-MODULES_WITH_QUANTIZERS = [DIANAConv2d , DIANALinear]
+MODULES_WITH_QUANTIZERS = [  AnalogConv2d , DIANAConv2d , DIANALinear]
 
 class DianaOpQuantFinder(Finder):
 
@@ -19,11 +19,13 @@ class DianaOpQuantFinder(Finder):
     
     def find(self, g: fx.GraphModule) -> List[DianaAps]:
         def getmodule_name(module) :
+
             if type(module) == DIANAConv2d: 
                 return 'conv' 
             elif type(module) == DIANALinear: 
                 return 'linear'
-            
+            elif type(module) == AnalogConv2d: 
+                return 'aconv'
             return ''
      
         aps: List[DianaAps] = []
@@ -49,12 +51,12 @@ class DianaOpQuantApplier(Applier):
        
         type_in = IdentityType.default
         type_out = IdentityType.default
-        if ap.type == 'conv' and g.get_submodule(ap.node.target).is_analog: 
+        if ap.type == 'aconv' and g.get_submodule(ap.node.target).is_analog: 
             type_in = IdentityType.AIMC_IN
-            type_out = IdentityType.AIMC_OUT #uncomment later when using analog core 
-        qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'minmax', type_in)
-        qpost = AnalogOutIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'minmax', type_out) if type_out == IdentityType.AIMC_OUT else None
-        
+            type_out = IdentityType.AIMC_OUT 
+        qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'meanstd', type_in)
+        qpost = AnalogOutIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd', type_out) if type_out == IdentityType.AIMC_OUT else None
+  
         pre_target = id_ 
         
         
@@ -62,9 +64,9 @@ class DianaOpQuantApplier(Applier):
 
         g.add_submodule(pre_target ,qpre) 
         
-            
+
         input_node = None
-        # get input x of qpre 
+            # get input x of qpre 
         
         if len(ap.node.all_input_nodes) ==1: 
             input_node = ap.node.all_input_nodes[0]

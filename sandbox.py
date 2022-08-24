@@ -1,74 +1,134 @@
-from tracemalloc import start
 import torch 
 from torch import nn
+import time 
+import numpy as np 
 
-#test = nn.Sequential(nn.Linear(3,3 ), nn.Linear(3, 1 )) 
-#for idx ,m in enumerate(test.modules()): 
-#    print(idx , m) 
-#    if type(m) == nn.Sequential: 
-#        print("sequentuel ")
-#        continue
-#    rnd = torch.rand(3)
-#    out = m(rnd)
-#    print ("type: ", type(m)) 
-#    print("out:L ", out)
-# target output size of 5x7
-#m = nn.AdaptiveAvgPool2d((5,7))
-#input = torch.randn(1, 64, 8, 9)
-#output = m(input)
-#print(output.size())
-## target output size of 7x7 (square)
-#m = nn.AdaptiveAvgPool2d(7)
-#input = torch.randn(1, 64, 10, 9)
-#output = m(input)
-## target output size of 10x7
-#m = nn.AdaptiveAvgPool2d((None, 7))
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-#output = m(input)
+
+def measure_time(func , *args) : 
+    torch.cuda.synchronize()
+    t0 = time.time()
+    _ = func(*args )
+    torch.cuda.synchronize()
+    return time.time()-t0
+
+def measure_performance (func , benchmark_loop_count, *args) : # returns 
+    # dry runs 
+    times = []
+    for i in range(5) : 
+        measure_time(func, *args) 
+    for i in range(benchmark_loop_count): 
+        times.append(measure_time(func, *args))
+    return np.mean(np.asarray(times)*1e3),  np.std(np.asarray(times)*1e3)
+
+def measure_memory_usage (func , *args ) : 
+    torch.cuda.empty_cache()
+    a = torch.cuda.memory_allocated(device)
+    valid_out = func(*args) 
+    b = torch.cuda.memory_allocated(device)
+    print("memory usage: " , b - a) 
+    return b - a
+
+
+def conv_method  (feature_map : torch.Tensor , kernel : torch.Tensor ,stride , padding  ) : 
+
+    negative_x = torch.minimum(feature_map,torch.Tensor([0]).to(feature_map.device)) 
+    positive_x= torch.maximum(feature_map,torch.Tensor([0]).to(feature_map.device)) 
+    negative_kernel = torch.minimum(kernel , torch.Tensor([0]).to(feature_map.device))
+    positive_kernel = torch.maximum(kernel , torch.Tensor([0]).to(feature_map.device))
+    clipping = [-200,200]
+    # positive products are summed together, negative products are summed together 
+
+    conv_out_neg = torch.clamp(torch.nn.functional.conv2d(negative_x , positive_kernel,stride =stride , padding=padding ) +torch.nn.functional.conv2d(positive_x , negative_kernel,stride =stride , padding=padding ), min=clipping[0] , max = clipping[1]) # positive fmap * neg kernal + pos kernel * neg featuremap
+    conv_out_pos= torch.clamp(torch.nn.functional.conv2d(positive_x , positive_kernel,stride =stride , padding=padding )+ torch.nn.functional.conv2d(negative_x , negative_kernel,stride =stride , padding=padding ), min=clipping[0] , max = clipping[1]) 
+    return conv_out_neg + conv_out_pos  
+def unfold_mat_mult(feature_map : torch.Tensor , kernel : torch.Tensor ,stride , padding ): 
+    out_H = int(((feature_map.size(2)-kernel_size+2*padding)/stride)+1)
+    out_W = int(((feature_map.size(3)-kernel_size+2*padding)/stride)+1)
+    clipping = [-200,200]
+    inp_unf = nn.functional.unfold(feature_map , kernel_size , stride =stride , padding = padding).transpose(1, 2)
+    inp_unf_pos = torch.maximum(inp_unf,torch.Tensor([0]).to(feature_map.device)) 
+    inp_unf_neg= torch.minimum(inp_unf,torch.Tensor([0]).to(feature_map.device)) 
+    negative_kernel = torch.minimum(kernel , torch.Tensor([0]).to(feature_map.device)).view(kernel.size(0), -1).t()
+    positive_kernel = torch.maximum(kernel , torch.Tensor([0]).to(feature_map.device)).view(kernel.size(0), -1).t()
+    out_unf_neg = torch.clamp(inp_unf_pos.matmul(negative_kernel)+  inp_unf_neg.matmul(positive_kernel) , min=clipping[0] , max = clipping[1] )
+    out_unf_pos = torch.clamp(inp_unf_pos.matmul(positive_kernel)+  inp_unf_neg.matmul(negative_kernel) , min=clipping[0] , max = clipping[1] )
+    out_unf = (out_unf_pos + out_unf_neg).transpose(1, 2) #matmul(kernel.view(kernel.size(0), -1).t()).transpose(1, 2)
+    return torch.nn.functional.fold(out_unf, (out_H, out_W), (1, 1))
+def unfold_sparse_mat_mult(feature_map : torch.Tensor , kernel : torch.Tensor ,stride , padding): 
+    out_H = int(((feature_map.size(2)-kernel_size+2*padding)/stride)+1)
+    out_W = int(((feature_map.size(3)-kernel_size+2*padding)/stride)+1)
+    clipping = [-200,200]
+    inp_unf = nn.functional.unfold(feature_map , kernel_size , stride =stride , padding = padding).transpose(1, 2)
+    inp_unf_pos = torch.maximum(inp_unf,torch.Tensor([0]).to(feature_map.device)).to_sparse()
+    print(inp_unf_pos.size())
+    inp_unf_neg= torch.minimum(inp_unf,torch.Tensor([0]).to(feature_map.device)) .to_sparse()
+    negative_kernel = torch.minimum(kernel , torch.Tensor([0]).to(feature_map.device)).view(kernel.size(0), -1).t().to_sparse()
+    print(negative_kernel.size())
+    positive_kernel = torch.maximum(kernel , torch.Tensor([0]).to(feature_map.device)).view(kernel.size(0), -1).t().to_sparse()
+    for i in range(inp_unf.size(0)): 
+        out_unf_neg = torch.clamp((torch.sparse.mm(inp_unf_pos[i],negative_kernel)+  torch.sparse.mm(inp_unf_neg[i],positive_kernel)).to_dense() , min=clipping[0] , max = clipping[1] )
+        out_unf_pos = torch.clamp((torch.sparse.mm(inp_unf_pos[i],positive_kernel)+  torch.sparse.mm(inp_unf_neg[i],negative_kernel)).to_dense() , min=clipping[0] , max = clipping[1] )
+    out_unf = (out_unf_pos + out_unf_neg).transpose(1, 2)#matmul(kernel.view(kernel.size(0), -1).t()).transpose(1, 2)
+    return torch.nn.functional.fold(out_unf, (out_H, out_W), (1, 1))
+     
+
 
 feature_map_batch_size = 2
 feature_map_H = 4 
 feature_map_W = 4 
 input_channels = 3 
 
-feature_map = torch.floor(torch.rand(feature_map_batch_size  ,  input_channels,feature_map_H ,feature_map_W ) * 10) 
+feature_map = torch.floor(torch.rand(feature_map_batch_size  ,  input_channels,feature_map_H ,feature_map_W ) * 10).to(device)
 
 
 
 
 kernel_size = 2
 kernel_count = 3 
-kernel = torch.floor((torch.rand(kernel_count , input_channels  , kernel_size,kernel_size)-0.5) * 4)
+kernel = torch.floor((torch.rand(kernel_count , input_channels  , kernel_size,kernel_size)-0.5) * 4 ).to(device)
+kernel.requires_grad = True
 padding = 0 
 stride = 1
 
+print("#################### Using standard conv2d method ####################")
 
-flattened_feature_map = torch.nn.functional.unfold(feature_map ,kernel_size =kernel_size ).unsqueeze(1) # 
-flattened_feature_map = flattened_feature_map.expand(feature_map_batch_size , kernel_count , flattened_feature_map.size(2) , flattened_feature_map.size(3) )
-print(flattened_feature_map.shape)
-flattened_kernel = kernel.view(kernel.size(0), -1).unsqueeze(0).expand(feature_map_batch_size , kernel_count , -1).unsqueeze(3).expand(feature_map_batch_size,kernel_count, flattened_feature_map.size(2), flattened_feature_map.size(3))
+# Measuring memory 
+torch.cuda.empty_cache()
+a = torch.cuda.memory_allocated(device)
+valid_out = nn.functional.conv2d(feature_map , kernel , None , stride  , padding=padding)
+b = torch.cuda.memory_allocated(device)
+print(valid_out)
+print("memory usage: " , b - a) 
+# Conv way 
 
-flattened_out = flattened_kernel * flattened_feature_map
-out_H = int((feature_map_H-kernel_size+2* padding)/stride+1 ) 
-out_W = int((feature_map_W-kernel_size+2* padding)/stride+1 )
-
-
-#flattened_out = torch.sum(flattened_out , 2).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
-#negative addition 
-negative_mask = flattened_out <0
-
-
-negative_clip = -10 
-positive_clip = 10
-
-negative_out = torch.max(torch.sum(flattened_out*negative_mask , 2)  , negative_clip) 
-positive_out = torch.min(torch.sum(flattened_out*~negative_mask , 2), positive_clip) 
-
-total_out = (negative_out + positive_out).reshape(feature_map_batch_size ,kernel_count, out_H ,out_W )
+ 
+##### TWO LINE CONVOLUTION #####
+## Convolution way ### 
 
 
+print("#################### Using conv2d method ####################")
+padded_out = conv_method(feature_map , kernel, stride , padding) 
+print(padded_out)
+assert( torch.all (valid_out.eq(padded_out)))
+# Measuring memory 
 
-conv_out = nn.functional.conv2d(feature_map , kernel , None , stride  , padding=padding)
-print(conv_out)
-print(total_out)
-print ("SUCCESS" if torch.all (conv_out.eq(total_out)) else "failure")
+## Convolution way end ##  
+print("#################### Using unfold method ####################")
+unfolded_out = unfold_mat_mult(feature_map , kernel, stride , padding) 
+print(unfolded_out)
+assert( torch.all (valid_out.eq(unfolded_out)))
+# Measuring memory 
+
+
+print("#################### Using unfold sparse matrices method ####################")
+padded_out = unfold_sparse_mat_mult(feature_map , kernel, stride , padding) 
+print(padded_out)
+assert( torch.all (valid_out.eq(padded_out)))
+# Measuring memory 
+
+
+
+
+    
