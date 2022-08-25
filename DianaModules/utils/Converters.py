@@ -72,7 +72,7 @@ class DianaF2FQuantiser(ComposedEditor):
             
             ModuleWiseConverter(modulewisedescriptionspec)]  
         if map_to_analog : 
-            editors.append(AnalogConvMapper(analogcoredescriptionspec))
+            editors.append(AnalogConvMapper(analogcoredescriptionspec)), QuantLibRetracer() , 
         editors += [ DianaF2FInterposer()  ,  
         
             
@@ -99,7 +99,7 @@ class DianaF2TConverter(ComposedEditor) :
             F2TAnnotator(),
             EpsTunnelInserter(),
             
-            #AnalogConvIntegrizer() ,
+            AnalogConvIntegrizer() ,
             DianaLinearOpIntegrizer(), 
           
             
@@ -108,8 +108,8 @@ class DianaF2TConverter(ComposedEditor) :
             ]
         
         editor_post = [   
-           #EpsTunnelConstructSimplifier(),
-           #EpsTunnelRemover() # error here solve later
+           EpsTunnelConstructSimplifier(),# TODO problem here with additions and padding and other studd
+           EpsTunnelRemover() # error here solve later
         ]
 
         super(DianaF2TConverter, self).__init__(editors + custom_editor + editor_post)

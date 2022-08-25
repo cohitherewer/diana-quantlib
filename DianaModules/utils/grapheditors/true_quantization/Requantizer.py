@@ -27,7 +27,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
 
         super(DianaRequantizerApplier, self).__init__(pattern)
         self.div_max_bitwidth = torch.Tensor([2 ** 15])  # the requantisation factor
-
+        self.bn_bitwidth =torch.Tensor([2**8]) 
     
 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
@@ -79,6 +79,9 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
       
             new_module = dq.DigitalRequantizer( div=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
         else: 
+            # for onnx graph generation later 
+            #gamma_int  = torch.floor(self.bn_bitwidth * gamma / sigma)   / self.bn_bitwidth
+            # end 
             gamma_int = torch.floor(self.div_max_bitwidth * (eps_in * gamma)             / (sigma * eps_out)) #clip to power of 2
            
             if torch.all(gamma_int.eq(torch.Tensor([0])) ):  # truncation 

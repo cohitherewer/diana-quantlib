@@ -228,6 +228,7 @@ class AnalogConv2d(DIANAConv2d):
         self.max_channels = math.floor(array_size/k_size)
         assert self.max_channels >= 1 , f"Array size must be at least kernel_size * kernel_size: {kernel_size**2}"
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels, out_channels, kernel_size, stride, padding, dilation, bias=False)
+
         self.gain = nn.Parameter(torch.rand(math.ceil(in_channels/self.max_channels))*4)# Analog domain gain from Vgs 
         self.out_H = None # saving to not keep recomputing in forward pass 
         self.out_W = None # saving to not keep recomputing in forwar*d pass 
@@ -244,18 +245,24 @@ class AnalogConv2d(DIANAConv2d):
             weight = self.qweight
         else:
             weight = self.weight
-       
+    
+        min_i =0
+        max_i = 0 
         for i in range(group_count): # chance for parallelization across distributed loads 
             
-            group_passed = x[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ] 
-            pass_weight = weight[: , (x.size(1)-tile_size*(group_count-i)):(x.size(1)-tile_size*(group_count-i-1)) , : , : ]
-            conv_out = nn.functional.conv2d(group_passed , pass_weight , stride = self.stride , ) 
+            max_i =min( tile_size+max_i , x.size(1) ) 
+
+            group_passed = x[: , min_i:max_i , : , : ] 
+            pass_weight = weight[: , min_i:max_i , : , : ]
+            conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding) 
             if padded_out is None:            
                 padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
-            padded_out[i,:, :, : , : ] = conv_out
+            padded_out[i] = conv_out
             counter = counter - tile_size 
+            min_i = max_i 
             if counter < self.max_channels: 
                 tile_size = counter # remaining 
+        
         return padded_out
 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
@@ -309,7 +316,7 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
   
 
     def forward(self , x : torch.Tensor) : 
-        with torch.no_grad: 
-            
-            x = x + 0.04*x*torch.randn_like(x)
-            return torch.clamp(x, self.clip_lo , self.clip_hi ) 
+        self.clip_lo  = self.clip_lo.to(x.device)
+        self.clip_hi  = self.clip_hi.to(x.device)
+        x = x + 0.04*x*torch.randn_like(x)
+        return torch.clamp(x, self.clip_lo , self.clip_hi ) 

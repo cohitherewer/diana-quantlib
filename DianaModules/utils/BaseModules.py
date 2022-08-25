@@ -212,7 +212,7 @@ class DianaModule: # Base class for all diana models
         if train_FP_model:  
             print("Training FP Model...")
             out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' if output_weights_path is not None else None
-            self.configure_optimizer('SGD' ,lr = 0.1 , momentum = 0.9, weight_decay=1e-4)
+            self.configure_optimizer('SGD' ,lr = 0.01 , momentum = 0.1, weight_decay=5e-5)
             FP_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
             print("Finished Training FP Model...")
             #DianaModule.plot_training_metrics(FP_metrics) 
