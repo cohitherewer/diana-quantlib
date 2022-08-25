@@ -55,7 +55,8 @@ class DianaModule: # Base class for all diana models
     def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
             if issubclass(type(module), _QModule) and module._is_quantised: 
-                module.scale = torch.Tensor(torch.exp2(torch.floor(torch.log2(module.scale))) )     
+                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
+               
             elif (issubclass(type(module),DianaModule) and self is not module) : 
                 module.clip_scales() # recursion
     def forward(self, x : torch.Tensor) : 
@@ -68,7 +69,7 @@ class DianaModule: # Base class for all diana models
         return self.gmodule.named_modules()
     
     @classmethod 
-    def from_trained_model(cls, model: nn.Module): # returns fake quantized model from_ floating point quantised model 
+    def from_trained_model(cls, model: nn.Module , map_to_analog = True ): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
             ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} , ('const', {'a': 0.0 ,'b': 6}) , 'DIANA')), # upper clip is updated during training
@@ -84,7 +85,8 @@ class DianaModule: # Base class for all diana models
         converter  =  DianaF2FConverter(
             modulewisedescriptionspec,
             addtreeqdescriptionspec,
-            analogcoredescriptionspec
+            analogcoredescriptionspec , 
+            map_to_analog=map_to_analog
         )
       
         converted_graph =converter(graph) 
@@ -92,10 +94,16 @@ class DianaModule: # Base class for all diana models
         return converted_graph
          
     def true_quantize(self, custom_editors : List[Editor]=[]): # integrise model 
+        # free relus upper boun d
+        for _ ,module in self.gmodule.named_modules():
+            if isinstance(module,DIANAReLU) : 
+                module.freeze()
+        self.clip_scales_pow2()
         converter = DianaF2TConverter(custom_editor=custom_editors)
         x, _ = self.train_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
+        
         self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataset['scale']}})
         self._integrized = True
         pass 
@@ -204,7 +212,7 @@ class DianaModule: # Base class for all diana models
         if train_FP_model:  
             print("Training FP Model...")
             out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' if output_weights_path is not None else None
-            self.configure_optimizer('SGD' ,lr = 0.01 , momentum = 0.9, weight_decay=1e-5)
+            self.configure_optimizer('SGD' ,lr = 0.1 , momentum = 0.9, weight_decay=1e-4)
             FP_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
             print("Finished Training FP Model...")
             #DianaModule.plot_training_metrics(FP_metrics) 
@@ -263,5 +271,29 @@ class DianaModule: # Base class for all diana models
                 _ = self.gmodule(x) 
         self.stop_observing() 
        
-        # return model to gpu for trianing 
+        
+
+    def evaluate_model(self, criterion=nn.CrossEntropyLoss() , batch_size=128) : 
         self.gmodule.to(DianaModule.device)
+        self.gmodule.eval () 
+        data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=batch_size, shuffle=True  ,pin_memory=True)}
+        running_loss = 0 
+        running_correct = 0 
+        for i,data in enumerate(data_loader['validate']): 
+            
+            x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+            with torch.no_grad(): 
+                yhat = self.gmodule(x)
+                loss = criterion(yhat, y) 
+                
+            
+            predictions = torch.argmax(yhat , 1)
+
+            running_loss += loss.item() *x.size(0) 
+            running_correct += torch.sum(predictions==y) .item()
+            
+ 
+        e_loss = running_loss / len(data_loader['validate'].dataset)
+        e_acc = running_correct / len(data_loader['validate'].dataset) 
+        return e_loss , e_acc 
+       

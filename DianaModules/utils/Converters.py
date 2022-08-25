@@ -17,6 +17,7 @@ from quantlib.editing.editing.fake2true.annotation.inputdescription import Input
 from quantlib.editing.editing.fake2true.epstunnels.inserter.rewriter import EpsTunnelInserter
 from quantlib.editing.editing.fake2true.epstunnels.remover.rewriter import EpsTunnelRemover
 from quantlib.editing.editing.fake2true.epstunnels.simplifier.rewriter import EpsTunnelConstructSimplifier
+from quantlib.editing.editing.fake2true.integerisation.requantiser import Requantiser
 
 
 from quantlib.editing.editing.float2fake.canonicalisation import F2FCanonicaliser
@@ -40,6 +41,7 @@ class DianaF2FConverter(ComposedEditor):
                  addtreeqdescriptionspec:     QDescriptionSpecType,
                  analogcoredescriptionspec : Tuple[str , ...]  ,
                  addtreeforceoutputeps:       bool = False ,
+                 map_to_analog : bool = True 
              ):
 
         super(DianaF2FConverter, self).__init__([
@@ -49,7 +51,8 @@ class DianaF2FConverter(ComposedEditor):
                 modulewisedescriptionspec,
                 addtreeqdescriptionspec,
                 analogcoredescriptionspec, 
-                addtreeforceoutputeps
+                addtreeforceoutputeps, 
+                map_to_analog=map_to_analog
                 
             )
          
@@ -63,16 +66,14 @@ class DianaF2FQuantiser(ComposedEditor):
                  addtreeqdescriptionspec:     QDescriptionSpecType,
                 analogcoredescriptionspec : Tuple [str , ...], 
                  addtreeforceoutputeps:       bool,
+                 map_to_analog : bool = True 
                  ):
-       
-        super(DianaF2FQuantiser, self).__init__([
-            QuantLibRetracer(),
+        editors = [QuantLibRetracer(),
             
-            ModuleWiseConverter(modulewisedescriptionspec),
-       
-            AnalogConvMapper(analogcoredescriptionspec) , 
-            
-            DianaF2FInterposer()  ,  
+            ModuleWiseConverter(modulewisedescriptionspec)]  
+        if map_to_analog : 
+            editors.append(AnalogConvMapper(analogcoredescriptionspec))
+        editors += [ DianaF2FInterposer()  ,  
         
             
             
@@ -83,9 +84,11 @@ class DianaF2FQuantiser(ComposedEditor):
             ),
             QuantLibRetracer()  ,
             DianaQuantizerFuser() ,# ignore the harmonise adds 
-           
-           
-        ]) 
+           ]
+       
+        super(DianaF2FQuantiser, self).__init__(
+            editors                   
+    ) 
 
 class DianaF2TConverter(ComposedEditor) : 
     def __init__(self, custom_editor : List[Editor] = []) : 
@@ -95,14 +98,18 @@ class DianaF2TConverter(ComposedEditor) :
           
             F2TAnnotator(),
             EpsTunnelInserter(),
-            AnalogConvIntegrizer() ,
+            
+            #AnalogConvIntegrizer() ,
             DianaLinearOpIntegrizer(), 
-         
-            DianaRequantizer()]
+          
+            
+            
+            DianaRequantizer() 
+            ]
         
         editor_post = [   
-            EpsTunnelConstructSimplifier(),
-            EpsTunnelRemover()
+           #EpsTunnelConstructSimplifier(),
+           #EpsTunnelRemover() # error here solve later
         ]
 
         super(DianaF2TConverter, self).__init__(editors + custom_editor + editor_post)

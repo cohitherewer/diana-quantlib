@@ -5,10 +5,10 @@ from torch import nn
 from quantlib.editing.graphs.nn.requant import Requantisation 
 
 class AnalogRequantizer(Requantisation): # # neeed to inhereit from requantisation for tracing and traversal of quantlib 
-    def __init__(self,scale : torch.Tensor , zero : torch.Tensor , n_levels : torch.Tensor, mul : torch.Tensor, add : torch.Tensor ) -> None:
+    def __init__(self,div : torch.Tensor , zero : torch.Tensor , n_levels : torch.Tensor, mul : torch.Tensor, add : torch.Tensor ):
         # scale and clipping range 
-        super().__init__() 
-        self.register_buffer("div", scale ) # scale 
+        nn.Module.__init__(self)
+        self.register_buffer("div", div ) # scale 
         self.register_buffer("clip_lo", zero)
         self.register_buffer("clip_hi", zero + n_levels-1)
         self.register_buffer("mul", mul)
@@ -16,7 +16,7 @@ class AnalogRequantizer(Requantisation): # # neeed to inhereit from requantisati
         self.qop = AnalogQuantOp.apply
         
     def forward(self , x : torch.Tensor): 
-        return self.qop(self.div,self.zero, self.clip_hi,self.mul , self.add ) 
+        return self.qop(x , self.div,self.clip_lo, self.clip_hi,self.mul , self.add ) 
      
 
 class AnalogQuantOp(torch.autograd.Function):

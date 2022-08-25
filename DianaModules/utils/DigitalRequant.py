@@ -5,10 +5,10 @@ from torch import nn
 from quantlib.editing.graphs.nn.requant import Requantisation 
 
 class DigitalRequantizer(Requantisation): # div and clip operations # neeed to inhereit from requantisation for tracing and traversal of quantlib 
-    def __init__(self, scale : torch.Tensor , zero : torch.Tensor , n_levels : torch.Tensor) -> None:
+    def __init__(self, div : torch.Tensor , zero : torch.Tensor , n_levels : torch.Tensor) -> None:
         # scale and clipping range 
         nn.Module.__init__(self)
-        self.register_buffer("div", scale) # scale 
+        self.register_buffer("div", div) # scale 
         self.register_buffer("clip_lo", zero)
         self.register_buffer("clip_hi", n_levels-1 + zero)
 

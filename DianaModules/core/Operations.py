@@ -57,11 +57,8 @@ class DianaBaseOperation:
                 for c in range(self.clip_lo.size(0)) : 
                     if self.clip_lo[c][0][0][0] < 0 : 
                         self.bw_clip_lo[c][0][0][0] =  -self.bw_clip_lo[c][0][0][0] 
-                      
-        else: 
-            if self.clip_lo < 0: 
-                self.bw_clip_lo = -self.bw_clip_lo 
-        if self.clip_lo < 0: # TODO  for now just leave this so low clipping bound is -127  , implement this later specifically for simd model 
+      
+        elif self.clip_lo < 0: # TODO  for now just leave this so low clipping bound is -127  , implement this later specifically for simd model 
             self.bw_clip_lo = -self.bw_clip_lo #+ 1
         
 class IdentityType(enum.Enum):  
@@ -156,7 +153,7 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
                 self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
 
             #  clip here and freeze 
-            self.freeze() 
+          #  self.freeze() 
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
         self.define_bitwidth_clipping()
@@ -206,6 +203,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation): #digital core
         
         self.bw_clip_hi = self.bw_clip_hi.to(x.device) 
         self.bw_clip_lo = self.bw_clip_lo.to(x.device) 
+
         return self._qop(x, self.bw_clip_lo, self.bw_clip_hi, self.step, self.scale) 
    
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
@@ -214,10 +212,12 @@ class DIANAConv2d(QConv2d , DianaBaseOperation): #digital core
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
         self.define_bitwidth_clipping()
-   
+    def forward(self, x: torch.Tensor) : 
+        x = x.to(self.weight.device)
+        return super().forward(x)
 
 
-# Analog Core Conv Operation: DAC , noise ,  split channels conv ,  quantize , then accumulate 
+# Analog Core Conv Operation: DAC ,  ,  split channels conv ,  quantize ,noise then accumulate 
 class AnalogConv2d(DIANAConv2d): 
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, in_channels: int, out_channels: int, kernel_size: int, stride: Tuple[int, ...] = 1, padding: str = 0, dilation: Tuple[int, ...] = 1, array_size : int = 1152):
         
@@ -295,26 +295,21 @@ class AnalogAccumulator(nn.Module): # given a five dimensional tensor return a r
 
 class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
     def __init__(self ,signed , bitwidth,  mu_percentage = 0.04 , sigma_percentage= 0.015) : 
+        super().__init__()
         range =2**bitwidth  
         self.signed = signed
-        self.mu = torch.Tensor([range * mu_percentage ])
-        self.sigma = torch.Tensor([range * sigma_percentage]) 
+        #self.mu = torch.Tensor([range * mu_percentage ])
+        #self.sigma = torch.Tensor([range * sigma_percentage]) 
         if signed: 
-            self.mu /= 2 
-            self.sigma /= 2  
             self.clip_lo = torch.Tensor([-2**(bitwidth-1)])
             self.clip_hi = -self.clip_lo + 1 
         else : 
             self.clip_lo = torch.Tensor([0])
             self.clip_hi = torch.Tensor([2**bitwidth]) -1 
-        self.enable = False 
+  
 
-    def enable(self): 
-        self.enable = True 
     def forward(self , x : torch.Tensor) : 
-        if self.enable: 
-            with torch.no_grad: 
-                sign_coeff = torch.round(torch.rand_like(x)) # 50 % random sign 
-                noise_add = torch.randn_like(x) * self.sigma + sign_coeff*self.mu   #
-                return torch.clamp(x + noise_add , self.clip_lo , self.clip_hi ) 
-        return x
+        with torch.no_grad: 
+            
+            x = x + 0.04*x*torch.randn_like(x)
+            return torch.clamp(x, self.clip_lo , self.clip_hi ) 

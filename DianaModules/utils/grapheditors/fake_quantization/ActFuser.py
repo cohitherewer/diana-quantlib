@@ -30,8 +30,8 @@ class DianaQuantizerFuserFinder(Finder) :
             
         for node in g.graph.nodes: 
             if node.target in names : 
-                predecessor = [ p for p in node.all_input_nodes ] 
-                if len(predecessor) == 1 and predecessor[0].target in names:# and  issubclass(type(g.get_submodule(users[0].target)), _QActivation): 
+                predecessors = [ p for p in node.all_input_nodes ] 
+                if len(predecessors) == 1 and predecessors[0].target in names:# and  issubclass(type(g.get_submodule(users[0].target)), _QActivation): 
                     aps.append(DianaAps('' , node))
         
         return aps 
@@ -45,6 +45,8 @@ class DianaQuantizerFuserApplier(Applier) :
         pre_module = g.get_submodule(pre_node.target) 
         cur_module = g.get_submodule(ap.node.target) 
         lower_bitwidth = 0 if (min(pre_module.n_levels, cur_module.n_levels) == pre_module.n_levels ) else 1
+        
+        
         if lower_bitwidth == 0 : 
             #if it's 0 then remove cur node 
             cur_node_users = [u for u in ap.node.users ]
@@ -61,6 +63,7 @@ class DianaQuantizerFuserApplier(Applier) :
             # Edit clipping of pre_node        
         else: 
             pre_node_users = [p for p in pre_node.users]  # upstream
+        
             if len(pre_node_users)  == 1:  # make sure pre node only has 1 user
                 for user in pre_node_users:  #without ap.node
                     user.replace_input_with(pre_node, ap.node)

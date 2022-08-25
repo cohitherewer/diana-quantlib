@@ -46,7 +46,7 @@ class AnalogConvApplier(Applier) :
         accum_target = id_ 
         accumulator = AnalogAccumulator() 
         noise_target = id_ + f'[{str(self._counter)}]'
-        noise_module = AnalogGaussianNoise() 
+        noise_module = AnalogGaussianNoise(signed=True , bitwidth=6) 
         g.add_submodule(accum_target , accumulator)
         g.add_submodule(noise_target, noise_module)
         # add noise 

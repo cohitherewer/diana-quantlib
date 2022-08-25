@@ -18,11 +18,20 @@ from DianaModules.utils.AnalogRequant import AnalogRequantizer
 import DianaModules.utils.DigitalRequant as dq
 
 from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import RequantiserMatcher
+from quantlib.editing.graphs.nn.requant import Requantisation
 
 class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be rewritten 
-    def __init__(self, pattern: NNSequentialPattern):
-        super().__init__(pattern) 
+    def __init__(self,
+                 pattern: NNSequentialPattern,
+                ):  # the integer bit-shift parameter
+
+        super(DianaRequantizerApplier, self).__init__(pattern)
+        self.div_max_bitwidth = torch.Tensor([2 ** 15])  # the requantisation factor
+
+    
+
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
+
         # get handles on matched `fx.Node`s
         name_to_match_node = self.pattern.name_to_match_node(nodes_map=ap)
         node_eps_in     = name_to_match_node['eps_in']
@@ -36,9 +45,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         module_bn         = name_to_match_module['bn'] if 'bn' in name_to_match_module.keys() else None
         module_activation = name_to_match_module['activation']
         module_eps_out    = name_to_match_module['eps_out']
-        if(issubclass(type(module_activation), dq.DigitalRequantizer) or isinstance(module_activation, AnalogRequantizer)): 
-            # return same module from nn.sequential 
-            return g
+
         assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
 
         # extract the parameters required to compute the requantiser's parameters
@@ -58,24 +65,28 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         gamma = gamma.reshape(broadcast_shape)
         beta  = beta.reshape(broadcast_shape)
 
-        gamma_int = torch.floor((2**round(math.log2(module_activation.n_levels)) * (eps_in * gamma)             / (sigma * eps_out))) # clip to the power of 2 
-        if gamma_int == torch.Tensor([0]) :  # truncation 
-            raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
-            #gamma_int = torch.tensor([2**round(math.log2(module_activation.n_levels)) /2])#TODO REMOVE THIS just for testing now
-  
-        beta_int  = torch.floor((2**round(math.log2(module_activation.n_levels))) * (-mi * gamma + beta * sigma) / (sigma * eps_out))
-        div =(2**round(math.log2(module_activation.n_levels)))  / gamma_int
+        #gamma_int = torch.floor(self.D * (eps_in * gamma)             / (sigma * eps_out))
+        #beta_int  = torch.floor(self.D * (-mi * gamma + beta * sigma) / (sigma * eps_out))
+
         # create the requantiser
         new_target = id_
-
         if module_bn is None: 
-            new_module = dq.DigitalRequantizer( scale=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
-            
-        else : 
-            new_module = AnalogRequantizer(scale = torch.Tensor([2**round(math.log2(module_activation.n_levels))]) , zero = module_activation.zero , n_levels=module_activation.n_levels, mul=gamma_int , add=beta_int) 
-            #raise ValueError
-            
         
+            gamma_int = torch.floor( self.div_max_bitwidth * eps_in             / ( eps_out)) # mul then div by self.D 
+            if gamma_int == torch.Tensor([0]) :  # truncation 
+                raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
+            div = self.div_max_bitwidth  / gamma_int
+      
+            new_module = dq.DigitalRequantizer( div=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
+        else: 
+            gamma_int = torch.floor(self.div_max_bitwidth * (eps_in * gamma)             / (sigma * eps_out)) #clip to power of 2
+           
+            if torch.all(gamma_int.eq(torch.Tensor([0])) ):  # truncation 
+                raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
+            beta_int  = torch.floor(self.div_max_bitwidth * (-mi * gamma + beta * sigma) / (sigma * eps_out))
+
+            new_module = AnalogRequantizer(self.div_max_bitwidth,  module_activation.zero , module_activation.n_levels, gamma_int , beta_int) 
+
         # add the requantiser to the graph...
         g.add_submodule(new_target, new_module)
         with g.graph.inserting_after(node_eps_in):
@@ -88,17 +99,10 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         # ...and delete the old construct
         g.delete_submodule(node_activation.target)
         g.graph.erase_node(node_activation)  # since `node_activation` is a user of `node_bn`, we must delete it first
-        
-        name_to_module = NameToModule(g.named_modules())
-        name_to_module[node_activation.target] = new_module
-        path_to_parent, child = NameToModule.split_path_to_target(node_activation.target)
-        setattr(name_to_module[path_to_parent], child, new_module)  # this is needed for nn sequentials
-
         if node_bn is not None:
             g.delete_submodule(node_bn.target)
             g.graph.erase_node(node_bn)
-            #path_to_parent, child = NameToModule.split_path_to_target(node_bn.target)
-            #delattr(name_to_module[path_to_parent], child)
+
         return g
 
 # create the general-purpose `Requantiser`

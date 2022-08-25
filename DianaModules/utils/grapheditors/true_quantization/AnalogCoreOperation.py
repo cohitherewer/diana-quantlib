@@ -9,6 +9,8 @@ from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.base.rewriter.applier import Applier
 from quantlib.editing.editing.editors.nnmodules.applicationpoint import NodesMap
+from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
+from quantlib.editing.editing.editors.nnmodules.pattern.base.pattern import NNModulePattern
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.candidates import Candidates, NNModuleDescription
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.factory import generate_named_patterns
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.roles import Roles
@@ -17,7 +19,6 @@ from quantlib.editing.editing.fake2true.integerisation.linearopintegeriser.finde
 from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
 import torch.fx as fx
 
-Analogchecker =( lambda m: True  ) 
 analog_roles  = Roles([
 
 
@@ -25,8 +26,9 @@ analog_roles  = Roles([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
     ('conv', Candidates([
-        ('QConv2d', NNModuleDescription(class_=AnalogConv2d, kwargs={'in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}))
+        ('QConv2d', NNModuleDescription(class_=AnalogConv2d, kwargs={'qrangespec':'ternary' , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd' , 'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}))
     ])),
+
 
     ('eps_conv_out', Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
@@ -37,6 +39,7 @@ analog_roles  = Roles([
      ('eps_identity_out', Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
+    # noise node 
     ('accumulator', Candidates([
         ('Accumulator', NNModuleDescription(class_=AnalogAccumulator, kwargs={})),
     ])),
@@ -45,9 +48,9 @@ analog_roles  = Roles([
     ])),
 ])
 
-class AnalogConvIntegrizerApplier(Applier) : 
-    def __init__(self):
-        super().__init__()
+class AnalogConvIntegrizerApplier(NNModuleApplier) : 
+    def __init__(self, pattern: NNModulePattern):
+        super().__init__(pattern)
     @classmethod 
     def create_torch_module(qconv : AnalogConv2d, ) :  
         assert isinstance(qconv, AnalogConv2d)  
@@ -59,7 +62,7 @@ class AnalogConvIntegrizerApplier(Applier) :
                                 dilation=qconv.dilation,
                                 groups=qconv.groups,
                                 bias=False)
-        new_module.weight.data = torch.round(qconv.weight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
+        new_module.weight.data = torch.round(qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
         new_module.register_buffer("is_analog" , torch.Tensor([True])) 
         new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
         new_module.gain.data = qconv.gain.data.clone().detach() 
