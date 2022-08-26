@@ -90,6 +90,8 @@ class DianaF2FQuantiser(ComposedEditor):
             editors                   
     ) 
 
+
+
 class DianaF2TConverter(ComposedEditor) : 
     def __init__(self, custom_editor : List[Editor] = []) : 
         editors = [
@@ -99,8 +101,8 @@ class DianaF2TConverter(ComposedEditor) :
             F2TAnnotator(),
             EpsTunnelInserter(),
             
-            AnalogConvIntegrizer() ,
-            DianaLinearOpIntegrizer(), 
+            #AnalogConvIntegrizer() ,
+            #DianaLinearOpIntegrizer(), 
           
             
             
@@ -108,8 +110,8 @@ class DianaF2TConverter(ComposedEditor) :
             ]
         
         editor_post = [   
-           EpsTunnelConstructSimplifier(),# TODO problem here with additions and padding and other studd
-           EpsTunnelRemover() # error here solve later
+           #EpsTunnelConstructSimplifier(),# TODO problem here with additions and padding and other studd
+          # EpsTunnelRemover() # error here solve later
         ]
 
         super(DianaF2TConverter, self).__init__(editors + custom_editor + editor_post)

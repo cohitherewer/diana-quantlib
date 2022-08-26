@@ -66,8 +66,9 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
         new_module.register_buffer("is_analog" , torch.Tensor([False]))  
         iweight = torch.round(qlinear.qweight.data.clone().detach() / qlinear.scale.data.clone().detach())  # integerised parameters
         new_module.weight.data = iweight
-       
+        print(qlinear.n_levels)
         if qlinear.bias is not None: 
+           
             new_module.bias.data = qlinear.bias.data.clone().detach() .round() 
             new_module.bias.type(torch.int32)
             

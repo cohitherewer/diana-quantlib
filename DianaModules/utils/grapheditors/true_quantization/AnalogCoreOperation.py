@@ -79,7 +79,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         node_conv  = name_to_match_node['conv']
         node_conv_out = name_to_match_node['eps_conv_out']
         node_identity_out= name_to_match_node['eps_identity_out'] # should have same eps in as node_conv_out epsout
-        node_noise= name_to_match_node['noise'] # TODO remove this in graph 
+        node_noise= name_to_match_node['noise'] # TODO remove this in graph when not simulating
         node_noise_out= name_to_match_node['eps_noise_out'] # 
         node_accumulator  = name_to_match_node['accumulator']
 
@@ -106,7 +106,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         node_conv_out.replace_input_with(node_conv, new_node)
         acc_users = [u for u in node_accumulator.users] 
         for u in acc_users: 
-            u.replace_input_with(node_accumulator , node_identity_out)
+            u.replace_input_with(node_accumulator , node_noise_out)
 
          # .and delete conv and accumulator opertions , set epstunnels of eps_identity_out eps_out to 1 and eps_out eps_in to 1
         module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
