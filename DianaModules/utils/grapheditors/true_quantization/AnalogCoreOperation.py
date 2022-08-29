@@ -65,7 +65,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
                                 dilation=qconv.dilation,
                                 groups=qconv.groups,
                                 bias=False)
-        new_module.weight.data =qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach() # fake quantized / scale = true quantized
+        new_module.weight.data = torch.round(qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
         new_module.register_buffer("is_analog" , torch.Tensor([True])) 
         new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
         new_module.gain.data = qconv.gain.data.clone().detach() 
@@ -114,7 +114,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         module_identity_out.set_eps_out(torch.ones_like(module_identity_out.eps_out)) 
       
         module_noise_out.set_eps_in(torch.ones_like(module_noise_out.eps_in))
-        module_noise_out.set_eps_out(torch.ones_like(module_noise_out.eps_out))
+        #module_noise_out.set_eps_out(torch.ones_like(module_noise_out.eps_out))
         # noise prop 
          # ...and delete the old operation
         g.delete_submodule(node_conv.target)

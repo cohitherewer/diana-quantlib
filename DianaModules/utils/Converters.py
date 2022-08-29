@@ -101,7 +101,7 @@ class DianaF2TConverter(ComposedEditor) :
             F2TAnnotator(),
             EpsTunnelInserter(),
             
-            #AnalogConvIntegrizer() ,
+            AnalogConvIntegrizer() ,
             #DianaLinearOpIntegrizer(), 
           
             

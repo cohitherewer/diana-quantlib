@@ -93,9 +93,9 @@ _Mixed_model.gmodule.load_state_dict(torch.load(out_path_m)['state_dict']) # out
 _Mixed_model.clip_scales_pow2()
 
 #optimizer_p = PACTSGD(_Mixed_model.gmodule , lr=0.0004 , pact_decay = 1e-6)
-for _ ,module in _Mixed_model.gmodule.named_modules():
-    if isinstance(module,DIANAReLU) : 
-        module.freeze()
+#for _ ,module in _Mixed_model.gmodule.named_modules():
+#    if isinstance(module,DIANAReLU) : 
+#        module.freeze()
 #optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01, weight_decay=5e-5)#0.9114
 #best_acc = 0 
 #params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_m ) 
@@ -137,7 +137,8 @@ print("fake quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #true quantization , validate accuracy 
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
 _Mixed_model.true_quantize()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
-
+for _ , module in _Mixed_model.named_modules(): 
+    print(module) 
 print("true quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #
 #
