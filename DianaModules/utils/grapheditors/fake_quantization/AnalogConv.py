@@ -62,6 +62,7 @@ class AnalogConvApplier(Applier) :
         qrange = self.spec[1]
         qhparaminitstrat = self.spec[2]
         analog_module = AnalogConv2d(qrangespec=qrange , qgranularityspec=qgranularity , qhparamsinitstrategyspec=qhparaminitstrat , in_channels=conv_module.in_channels , out_channels=conv_module.out_channels , kernel_size=conv_module.kernel_size , stride = conv_module.stride , padding=conv_module.padding , dilation=conv_module.dilation) #initialize the analog conv2d operation 
+        analog_module.weight.data = conv_module.weight.data.clone().detach() 
         #replace it 
         name_to_module = NameToModule(g.named_modules())
         name_to_module[node.target] = analog_module

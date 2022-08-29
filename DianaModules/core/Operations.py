@@ -146,17 +146,17 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
         self.is_analog = is_analog
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        if HW_Behaviour: 
-            if  self.is_analog:
-                self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
-            else: 
-                self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
+        #if HW_Behaviour: 
+        #    if  self.is_analog:
+        #        self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
+        #    else: 
+        #        self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
 
             #  clip here and freeze 
           #  self.freeze() 
-        else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
-        self.define_bitwidth_clipping()
+        #else : 
+        #    self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
+        pass
     
 
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
@@ -309,7 +309,7 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
         #self.sigma = torch.Tensor([range * sigma_percentage]) 
         if signed: 
             self.clip_lo = torch.Tensor([-2**(bitwidth-1)])
-            self.clip_hi = -self.clip_lo + 1 
+            self.clip_hi = -self.clip_lo -1 
         else : 
             self.clip_lo = torch.Tensor([0])
             self.clip_hi = torch.Tensor([2**bitwidth]) -1 
@@ -320,3 +320,5 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
         self.clip_hi  = self.clip_hi.to(x.device)
         x = x + 0.04*x*torch.randn_like(x)
         return torch.clamp(x, self.clip_lo , self.clip_hi ) 
+    def backward(self , grad_in : torch.Tensor) : 
+        return grad_in 

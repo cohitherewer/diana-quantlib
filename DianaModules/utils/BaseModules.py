@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Union
 import matplotlib as plt
 from numpy import isin 
 
-from DianaModules.core.Operations import DIANAReLU, DianaBaseOperation
+from DianaModules.core.Operations import AnalogConv2d, DIANAReLU, DianaBaseOperation
 from DianaModules.utils.onnx import DianaExporter
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -54,7 +54,7 @@ class DianaModule: # Base class for all diana models
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
     def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
-            if issubclass(type(module), _QModule) and module._is_quantised: 
+            if issubclass(type(module), _QModule) and  not isinstance(module, AnalogConv2d) and module._is_quantised: 
                 module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
                
             elif (issubclass(type(module),DianaModule) and self is not module) : 

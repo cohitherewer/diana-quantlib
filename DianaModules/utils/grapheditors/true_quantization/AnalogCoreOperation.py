@@ -65,7 +65,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
                                 dilation=qconv.dilation,
                                 groups=qconv.groups,
                                 bias=False)
-        new_module.weight.data =qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach() # fake quantized / scale = true quantized
+        new_module.weight.data = torch.round(qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
         new_module.register_buffer("is_analog" , torch.Tensor([True])) 
         new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
         new_module.gain.data = qconv.gain.data.clone().detach() 
@@ -79,7 +79,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         node_conv  = name_to_match_node['conv']
         node_conv_out = name_to_match_node['eps_conv_out']
         node_identity_out= name_to_match_node['eps_identity_out'] # should have same eps in as node_conv_out epsout
-        node_noise= name_to_match_node['noise'] # TODO remove this in graph 
+        node_noise= name_to_match_node['noise'] # TODO remove this in graph when not simulating
         node_noise_out= name_to_match_node['eps_noise_out'] # 
         node_accumulator  = name_to_match_node['accumulator']
 
@@ -106,7 +106,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         node_conv_out.replace_input_with(node_conv, new_node)
         acc_users = [u for u in node_accumulator.users] 
         for u in acc_users: 
-            u.replace_input_with(node_accumulator , node_identity_out)
+            u.replace_input_with(node_accumulator , node_noise_out)
 
          # .and delete conv and accumulator opertions , set epstunnels of eps_identity_out eps_out to 1 and eps_out eps_in to 1
         module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
@@ -114,7 +114,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         module_identity_out.set_eps_out(torch.ones_like(module_identity_out.eps_out)) 
       
         module_noise_out.set_eps_in(torch.ones_like(module_noise_out.eps_in))
-        module_noise_out.set_eps_out(torch.ones_like(module_noise_out.eps_out))
+        #module_noise_out.set_eps_out(torch.ones_like(module_noise_out.eps_out))
         # noise prop 
          # ...and delete the old operation
         g.delete_submodule(node_conv.target)
