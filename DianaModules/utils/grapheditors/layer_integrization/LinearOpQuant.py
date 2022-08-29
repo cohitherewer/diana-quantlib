@@ -45,6 +45,7 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
                                 out_features=qlinear.out_features,
                                 bias=(qlinear.bias is not None))
             
+            
 
         elif isinstance(qlinear, (nn.Conv1d, nn.Conv2d, nn.Conv3d,)):
             if isinstance(qlinear, nn.Conv1d):
@@ -60,16 +61,17 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
                                 dilation=qlinear.dilation,
                                 groups=qlinear.groups,
                                 bias=(qlinear.bias is not None))
-
+        
         else:
             raise RuntimeError
+
         new_module.register_buffer("is_analog" , torch.Tensor([False]))  
         iweight = torch.round(qlinear.qweight.data.clone().detach() / qlinear.scale.data.clone().detach())  # integerised parameters
         new_module.weight.data = iweight
-        print(qlinear.n_levels)
+
         if qlinear.bias is not None: 
            
-            new_module.bias.data = qlinear.bias.data.clone().detach() .round() 
+            new_module.bias.data = qlinear.bias.data.clone().detach()# .round() 
             new_module.bias.type(torch.int32)
             
             
@@ -118,8 +120,8 @@ di_roles = Roles([
     ])),
 
     ('linear', Candidates([
-        ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
-        ('QConv2d', NNModuleDescription(class_=DIANAConv2d , kwargs={'qrangespec':{'bitwidth': 8  , 'signed': True} , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd','in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}))
+       ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
+        #('QConv2d', NNModuleDescription(class_=DIANAConv2d , kwargs={'qrangespec':{'bitwidth': 8  , 'signed': True} , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd','in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True})) #TODO problem here 
     ])),
 
     ('eps_out', Candidates([

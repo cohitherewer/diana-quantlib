@@ -145,12 +145,13 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False , is_analog : bool = False):
         self.is_analog = is_analog
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
+  
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        #if HW_Behaviour: 
-        #    if  self.is_analog:
-        #        self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
-        #    else: 
-        #        self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
+        if HW_Behaviour: 
+            if  self.is_analog:
+                self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
+            else: 
+                self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
 
             #  clip here and freeze 
           #  self.freeze() 
@@ -301,24 +302,28 @@ class AnalogAccumulator(nn.Module): # given a five dimensional tensor return a r
         return torch.sum(x , 0) 
 
 class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
-    def __init__(self ,signed , bitwidth,  mu_percentage = 0.04 , sigma_percentage= 0.015) : 
+    def __init__(self ,signed , bitwidth,  SNR = 25 , std = 1) : 
         super().__init__()
         range =2**bitwidth  
         self.signed = signed
-        #self.mu = torch.Tensor([range * mu_percentage ])
-        #self.sigma = torch.Tensor([range * sigma_percentage]) 
+        self.SNR_i = 1/SNR
+        self.sigma = std
+  
         if signed: 
             self.clip_lo = torch.Tensor([-2**(bitwidth-1)])
             self.clip_hi = -self.clip_lo -1 
         else : 
             self.clip_lo = torch.Tensor([0])
             self.clip_hi = torch.Tensor([2**bitwidth]) -1 
+        self.enabled = False  
   
 
     def forward(self , x : torch.Tensor) : 
-        self.clip_lo  = self.clip_lo.to(x.device)
-        self.clip_hi  = self.clip_hi.to(x.device)
-        x = x + 0.04*x*torch.randn_like(x)
-        return torch.clamp(x, self.clip_lo , self.clip_hi ) 
+        if self.enabled: 
+            self.clip_lo  = self.clip_lo.to(x.device)
+            self.clip_hi  = self.clip_hi.to(x.device)
+            x = x + self.SNR_i*x*(torch.randn_like(x)  *self.sigma) 
+            return torch.clamp(x, self.clip_lo , self.clip_hi ) 
+        return x 
     def backward(self , grad_in : torch.Tensor) : 
         return grad_in 

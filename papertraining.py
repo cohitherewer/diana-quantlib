@@ -5,7 +5,7 @@ import torchvision
 import torchvision.datasets as ds  
 import torch
 from DianaModules.core.Operations import DIANAReLU 
-from DianaModules.models.LargeResnet import resnet20
+from DianaModules.models.cifar10.LargeResnet import resnet20
 from DianaModules.utils.BaseModules import DianaModule
 from torch import nn 
 import torch.utils.data as ut
@@ -16,7 +16,7 @@ from quantlib.editing.editing.tests import ILSVRC12
 
 train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-train_scale = torch.Tensor([1/256]) 
+train_scale = torch.Tensor([2**-8]) 
 validation_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
 
 output_weights_path = str(Path("zoo/cifar10/paper/resnet20").absolute() ) 
@@ -83,14 +83,18 @@ _Mixed_model.attach_train_dataset(train_dataset , train_scale)
 _Mixed_model.attach_validation_dataset(validation_dataset , train_scale) 
 _Mixed_model.initialize_quantization()
 _Mixed_model.map_scales(HW_Behaviour=True)
-
+for _ , module in _Mixed_model.named_modules()  : 
+    if isinstance(module, DIANAReLU) : 
+        print("min_flor is: ", module.min_float , "max_float: " , module.max_float, " scale:  " , module.scale)  
 print("finished initialization")
 ##train 
 _Mixed_model.gmodule.to(DianaModule.device)
 out_path_m = output_weights_path + "/"+'ResNet_Mixedweights.pth'
 out_path = output_weights_path + "/"+'ResNet_MixedBestweights.pth'
 _Mixed_model.gmodule.load_state_dict(torch.load(out_path_m)['state_dict']) # out_path previously optimized by bound 87.24 validation
-_Mixed_model.clip_scales_pow2()
+
+
+#_Mixed_model.clip_scales_pow2()
 
 #optimizer_p = PACTSGD(_Mixed_model.gmodule , lr=0.0004 , pact_decay = 1e-6)
 #for _ ,module in _Mixed_model.gmodule.named_modules():
@@ -136,9 +140,9 @@ _Mixed_model.clip_scales_pow2()
 print("fake quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #true quantization , validate accuracy 
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
-_Mixed_model.true_quantize()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
-for _ , module in _Mixed_model.named_modules(): 
-    print(module) 
+_Mixed_model.map_to_hw() 
+_Mixed_model.integrize_layers()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
+
 print("true quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #
 #

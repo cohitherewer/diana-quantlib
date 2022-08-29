@@ -10,6 +10,9 @@ import matplotlib as plt
 from numpy import isin 
 
 from DianaModules.core.Operations import AnalogConv2d, DIANAReLU, DianaBaseOperation
+from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
+from DianaModules.utils.converters.float2fake import F2FConverter
+from DianaModules.utils.converters.hwquantization import HWMappingConverter
 from DianaModules.utils.onnx import DianaExporter
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -72,7 +75,7 @@ class DianaModule: # Base class for all diana models
     def from_trained_model(cls, model: nn.Module , map_to_analog = True ): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} , ('const', {'a': 0.0 ,'b': 6}) , 'DIANA')), # upper clip is updated during training
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} ,'meanstd' , 'DIANA')), # upper clip is updated during training
             ({'types': ( 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
             ({'types': ( 'Linear' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
@@ -82,7 +85,7 @@ class DianaModule: # Base class for all diana models
         addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA')
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
-        converter  =  DianaF2FConverter(
+        converter  =  F2FConverter(
             modulewisedescriptionspec,
             addtreeqdescriptionspec,
             analogcoredescriptionspec , 
@@ -92,14 +95,25 @@ class DianaModule: # Base class for all diana models
         converted_graph =converter(graph) 
         
         return converted_graph
-         
-    def true_quantize(self, custom_editors : List[Editor]=[]): # integrise model 
+    
+    def map_to_hw(self , custom_editors : List[Editor]=[])  : 
         # free relus upper boun d
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,DIANAReLU) : 
                 module.freeze()
         self.clip_scales_pow2()
-        converter = DianaF2TConverter(custom_editor=custom_editors)
+        converter = HWMappingConverter(custom_editor=custom_editors)
+        x, _ = self.train_dataset['dataset'].__getitem__(0)
+        if len(x.shape) == 3 : 
+            x = x.unsqueeze(0)
+        
+        self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataset['scale']}})
+        self._integrized = True
+    def integrize_layers(self)    : 
+        for _ ,module in self.gmodule.named_modules():
+            if isinstance(module,DIANAReLU) : 
+                module.freeze()
+        converter = LayerIntegrizationConverter()
         x, _ = self.train_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
@@ -107,6 +121,7 @@ class DianaModule: # Base class for all diana models
         self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataset['scale']}})
         self._integrized = True
         pass 
+
 
     def export_model(self): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
@@ -282,6 +297,8 @@ class DianaModule: # Base class for all diana models
         for i,data in enumerate(data_loader['validate']): 
             
             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+            if self._integrized: 
+                x = torch.floor(x / self.validation_dataset['scale'].to(x.device)) 
             with torch.no_grad(): 
                 yhat = self.gmodule(x)
                 loss = criterion(yhat, y) 

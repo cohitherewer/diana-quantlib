@@ -1,24 +1,15 @@
+
+r""" Converts regular torch neural networko to a fake-quantized model  """
+
 from typing import List, Tuple
 
 from DianaModules.utils.grapheditors.fake_quantization.ActFuser import DianaQuantizerFuser
 from DianaModules.utils.grapheditors.fake_quantization.AnalogConv import AnalogConvMapper
 from DianaModules.utils.grapheditors.fake_quantization.Interposer import DianaF2FInterposer
-from DianaModules.utils.grapheditors.layer_integrization.AnalogCoreOperation import AnalogConvIntegrizer
-from DianaModules.utils.grapheditors.layer_integrization.LinearOpQuant import DianaLinearOpIntegrizer
-from DianaModules.utils.grapheditors.hw_mapping.Requantizer import DianaRequantizer
-
-
 
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
-from quantlib.editing.editing.editors.base.editor import Editor
 
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
-from quantlib.editing.editing.fake2true.annotation import F2TAnnotator
-from quantlib.editing.editing.fake2true.annotation.inputdescription import InputDescription, InputDescriptionSpecType
-from quantlib.editing.editing.fake2true.epstunnels.inserter.rewriter import EpsTunnelInserter
-from quantlib.editing.editing.fake2true.epstunnels.remover.rewriter import EpsTunnelRemover
-from quantlib.editing.editing.fake2true.epstunnels.simplifier.rewriter import EpsTunnelConstructSimplifier
-
 
 from quantlib.editing.editing.float2fake.canonicalisation import F2FCanonicaliser
 
@@ -32,7 +23,9 @@ from quantlib.editing.editing.float2fake.quantisation.qdescription.qdescription 
 
 import torch.fx as fx
 
-class DianaF2FConverter(ComposedEditor):
+from quantlib.editing.graphs.fx.tracing import QuantLibTracer
+
+class F2FConverter(ComposedEditor):
     """General-purpose converter to map floating-point networks into
     fake-quantised ones.
     """
@@ -44,10 +37,10 @@ class DianaF2FConverter(ComposedEditor):
                  map_to_analog : bool = True 
              ):
 
-        super(DianaF2FConverter, self).__init__([
+        super(F2FConverter, self).__init__([
             F2FCanonicaliser(),
             
-            DianaF2FQuantiser(
+            F2FQuantiser(
                 modulewisedescriptionspec,
                 addtreeqdescriptionspec,
                 analogcoredescriptionspec, 
@@ -58,8 +51,8 @@ class DianaF2FConverter(ComposedEditor):
          
         ])
 
-# this assumes that each module has fake-quantized identity output mapping (NO need for QuantiserInterposer).
-class DianaF2FQuantiser(ComposedEditor):
+
+class F2FQuantiser(ComposedEditor):
     """Specific Rewriter for the diana chip """
 
     def __init__(self,
@@ -69,11 +62,11 @@ class DianaF2FQuantiser(ComposedEditor):
                  addtreeforceoutputeps:       bool,
                  map_to_analog : bool = True 
                  ):
-        editors = [QuantLibRetracer(),
+        editors = [QuantLibTracer(),
             
             ModuleWiseConverter(modulewisedescriptionspec)]  
         if map_to_analog : 
-            editors.append(AnalogConvMapper(analogcoredescriptionspec)), QuantLibRetracer() , 
+            editors.append(AnalogConvMapper(analogcoredescriptionspec)) 
         editors += [ DianaF2FInterposer()  ,  
         
             
@@ -87,46 +80,4 @@ class DianaF2FQuantiser(ComposedEditor):
             DianaQuantizerFuser() ,# ignore the harmonise adds 
            ]
        
-        super(DianaF2FQuantiser, self).__init__(
-            editors                   
-    ) 
-
-class DianaF2TConverter(ComposedEditor) : 
-
-    def __init__(self, custom_editor : List[Editor] = []) : 
-        editors = [
-            
-            QuantLibRetracer(),
-          
-            F2TAnnotator(),
-            EpsTunnelInserter(),
-            
-            AnalogConvIntegrizer() ,
-            DianaLinearOpIntegrizer(), 
-          
-            
-            
-            DianaRequantizer() 
-            ]
-        
-        editor_post = [   
-           EpsTunnelConstructSimplifier(),# TODO problem here with additions and padding and other studd
-           EpsTunnelRemover() # error here solve later
-        ]
-
-        super(DianaF2TConverter, self).__init__(editors + custom_editor + editor_post)
-
-    def apply(self,
-              g: fx.GraphModule,
-              inputdescription: InputDescriptionSpecType = InputDescription(),
-              *args,
-              **kwargs) -> fx.GraphModule:
-
-        g = self._children_editors[0](g)                    # `QuantLibRetracer`
-        g = self._children_editors[1](g, inputdescription)  # `F2TAnnotator`
-        for editor in self._children_editors[2:]:
-            g = editor(g)
-
-        return g
-
-
+        super(F2FQuantiser, self).__init__( editors ) 
