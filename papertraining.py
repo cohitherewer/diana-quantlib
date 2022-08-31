@@ -4,7 +4,7 @@ from pathlib import Path
 import torchvision 
 import torchvision.datasets as ds  
 import torch
-from DianaModules.core.Operations import DIANAReLU 
+from DianaModules.core.Operations import AnalogConv2d, DIANAReLU, DianaBaseOperation 
 from DianaModules.models.cifar10.LargeResnet import resnet20
 from DianaModules.utils.BaseModules import DianaModule
 from torch import nn 
@@ -79,13 +79,15 @@ data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=Tru
 _Mixed_model = DianaModule(DianaModule.from_trained_model(model , map_to_analog=True ) ) # 8 bits only (digital core only )
 #for _ , module in _Mixed_model.named_modules(): 
 #    print(module )
+print("finished conversion") 
 _Mixed_model.attach_train_dataset(train_dataset , train_scale) 
 _Mixed_model.attach_validation_dataset(validation_dataset , train_scale) 
+_Mixed_model.gmodule.to(DianaModule.device)
 _Mixed_model.initialize_quantization()
 _Mixed_model.map_scales(HW_Behaviour=True)
-for _ , module in _Mixed_model.named_modules()  : 
-    if isinstance(module, DIANAReLU) : 
-        print("min_flor is: ", module.min_float , "max_float: " , module.max_float, " scale:  " , module.scale)  
+#for _ , module in _Mixed_model.named_modules()  : 
+#    if isinstance(module, DIANAReLU) : 
+#        print("min_flor is: ", module.min_float , "max_float: " , module.max_float, " scale:  " , module.scale)  
 print("finished initialization")
 ##train 
 _Mixed_model.gmodule.to(DianaModule.device)
@@ -142,9 +144,29 @@ print("fake quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
 _Mixed_model.map_to_hw() 
 _Mixed_model.integrize_layers()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
+_Mixed_model.gmodule.to(DianaModule.device)
+print("finished integrization") 
 
+#for  name , module in _Mixed_model.named_modules(): 
+#    print(module ) 
+for node in _Mixed_model.gmodule.graph.nodes: 
+    try: 
+       if isinstance(_Mixed_model.gmodule.get_submodule(node.target) , DianaBaseOperation) or node.target in ('view', 'avgpool') : 
+            predecessors = [p for p in node.all_input_nodes] 
+            users = [u  for u  in node.users]  
+            print(f'Diana Node {node} of type {type(_Mixed_model.gmodule.get_submodule(node.target))} with predecessors: ' , *predecessors , " and users: " , *users) 
+
+
+            #user = users[0]
+            #for i in range(6): 
+            #    users = [u  for u  in user.users]  
+            #    print(f'for analogconv2d user : {user} has type: {type(_Mixed_model.gmodule.get_submodule(user.target))} ' , " has users: " , *users) 
+            #    user = users[0]
+
+    except: 
+        continue 
+         
 print("true quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
-#
-#
-#converted_model  = DianaModule.from_trained_model(model , map_to_analog=True) # 8 bits only (digital core only )
-#
+
+
+# converted_model  = DianaModule.from_trained_model(model , map_to_analog=True) # 8 bits only (digital core only )
