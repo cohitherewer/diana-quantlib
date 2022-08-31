@@ -19,6 +19,8 @@ from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewr
 from quantlib.editing.editing.fake2true.integerisation.linearopintegeriser.finder import LinearOpIntegeriserMatcher
 from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
 import torch.fx as fx
+
+from quantlib.editing.graphs.nn.requant import Requantisation
 _BN_KWARGS = {'num_features': 1}
 
 analog_roles  = Roles([
@@ -35,7 +37,7 @@ analog_roles  = Roles([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
      ('identity', Candidates([
-        ('QIdentity', NNModuleDescription(class_=nn.Identity, kwargs={})),
+        ('Requant', NNModuleDescription(class_=Requantisation, kwargs={'mul': torch.Tensor([1]) , 'add': torch.Tensor([1]), 'zero': torch.Tensor([1]) , 'n_levels': torch.Tensor([1])})),
     ])),
      ('eps_identity_out', Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
@@ -73,6 +75,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         
 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
+        print("ANALOG CONV FOUND ")
         # get handles on matched `fx.Node`s
         name_to_match_node = self.pattern.name_to_match_node(nodes_map=ap)
         node_eps_in  = name_to_match_node['eps_in']

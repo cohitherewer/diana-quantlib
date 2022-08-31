@@ -317,7 +317,10 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
             self.clip_hi = torch.Tensor([2**bitwidth]) -1 
         self.enabled = False  
   
-
+    def enable(self): 
+        self.enabled = True
+    def disable(self): 
+        self.enabled = True
     def forward(self , x : torch.Tensor) : 
         if self.enabled: 
             self.clip_lo  = self.clip_lo.to(x.device)

@@ -2,24 +2,57 @@
 #region Requantizer (requantizer at output of operations)
 
 import math
-from quantlib.editing.editing.fake2true.integerisation.requantiser import roles ,admissible_screenplays
+
 import torch 
 from torch import nn
+from DianaModules.core.Operations import AnalogAccumulator
 
 from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
+
+
 from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
 import torch.fx as fx
 from quantlib.editing.editing.editors.nnmodules.applicationpoint import NodesMap
-from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.factory import generate_named_patterns
+
+from quantlib.editing.editing.editors.nnmodules import NNModuleDescription, Candidates, Roles, generate_named_patterns
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
-from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.modulewisedescription.nametomodule.nametomodule import NameToModule
 from quantlib.editing.editing.editors.nnmodules import NNSequentialPattern
 from DianaModules.utils.AnalogRequant import AnalogRequantizer
 import DianaModules.utils.DigitalRequant as dq
 
 from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import RequantiserMatcher
-from quantlib.editing.graphs.nn.requant import Requantisation
+from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
+_BN_KWARGS = {'num_features': 1}
+_EPS_KWARGS = {'eps': torch.Tensor([1.0])}
 
+roles = Roles([
+
+    ('eps_in',  Candidates([
+        ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
+    ])),
+    ('accumulator',  Candidates([
+         ('',     None),  #analog accumulator is an optional part of the pattern
+        ('AniaAccumulator', NNModuleDescription(class_=AnalogAccumulator, kwargs={})),
+    ])),
+    ('bn', Candidates([
+        ('',     None),  # batch-normalisation is an optional part of the pattern
+        ('BN1d', NNModuleDescription(class_=nn.BatchNorm1d, kwargs=_BN_KWARGS)),
+        ('BN2d', NNModuleDescription(class_=nn.BatchNorm2d, kwargs=_BN_KWARGS)),
+        ('BN3d', NNModuleDescription(class_=nn.BatchNorm3d, kwargs=_BN_KWARGS)),
+    ])),
+
+    ('activation', Candidates([
+        ('QIdentity',  NNModuleDescription(class_=nn.Identity,  kwargs={})),
+        ('QReLU',      NNModuleDescription(class_=nn.ReLU,      kwargs={})),
+        ('QReLU6',     NNModuleDescription(class_=nn.ReLU6,     kwargs={})),
+        ('QLeakyReLU', NNModuleDescription(class_=nn.LeakyReLU, kwargs={})),
+    ])),
+
+    ('eps_out', Candidates([
+        ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
+    ])),
+])
+admissible_screenplays = list(roles.all_screenplays)
 class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be rewritten 
     def __init__(self,
                  pattern: NNSequentialPattern,
@@ -36,6 +69,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         name_to_match_node = self.pattern.name_to_match_node(nodes_map=ap)
         node_eps_in     = name_to_match_node['eps_in']
         node_bn         = name_to_match_node['bn'] if 'bn' in name_to_match_node.keys() else None
+        node_acc         = name_to_match_node['accumulator'] if 'accumulator' in name_to_match_node.keys() else None
         node_activation = name_to_match_node['activation']
         node_eps_out    = name_to_match_node['eps_out']
 
@@ -118,8 +152,12 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
 
         # add the requantiser to the graph...
         g.add_submodule(new_target, new_module)
-        with g.graph.inserting_after(node_eps_in):
-            new_node = g.graph.call_module(new_target, args=(node_eps_in,))
+        if node_acc is not None: 
+            with g.graph.inserting_after(node_acc):
+                new_node = g.graph.call_module(new_target, args=(node_acc,))
+        else: 
+            with g.graph.inserting_after(node_eps_in):
+                new_node = g.graph.call_module(new_target, args=(node_eps_in,))
         node_eps_out.replace_input_with(node_activation, new_node)
 
         module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))

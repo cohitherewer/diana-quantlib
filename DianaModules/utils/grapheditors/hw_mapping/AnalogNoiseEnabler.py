@@ -7,36 +7,31 @@ from DianaModules.utils.grapheditors import DianaAps
 from DianaModules.core.Operations import AnalogGaussianNoise
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 
-class AnalogNoiseRemoverFinder(Finder) : 
+class AnalogNoiseEnablerFinder(Finder) : 
     def __init__(self) -> None:
         super().__init__()
     def find(self, g: fx.GraphModule) -> List[DianaAps]:
         aps : List[DianaAps] = [] 
         for node in g.graph.nodes: 
-            try: 
+            try :
                 if isinstance(g.get_submodule(node.target) , AnalogGaussianNoise): 
                     aps.append(DianaAps('noise' , node )) 
             except: 
-                continue
+                continue 
         return aps 
     def check_aps_commutativity(self, aps: List[DianaAps]) -> bool:
         return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
-class AnalogNoiseRemoverApplier(Applier) : 
+class AnalogNoiseEnablerApplier(Applier) : 
     def __init__(self):
         super().__init__()
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
         node = ap.node
-        predecessor = [p for p in node.all_input_nodes] 
-        assert len(predecessor) == 1
-        users = [ u for u in node.users] 
-        for u in users: 
-            u.replace_input_with(node , predecessor[0]) 
-        g.delete_submodule(node.target) 
-        g.graph.erase_node(node)
+        module = g.get_submodule(node.target) 
+        module.enable() 
         return g 
 
 
-class AnalogNoiseRemover(Rewriter): #insert quantidentities between 
+class AnalogNoiseEnabler(Rewriter): #insert quantidentities between 
     def __init__(self):
-       super(AnalogNoiseRemover, self).__init__(name='AnalogNoiseRemover', symbolic_trace_fn=quantlib_symbolic_trace,finder= AnalogNoiseRemoverFinder(), applier=AnalogNoiseRemoverApplier()) 
+       super(AnalogNoiseEnabler, self).__init__(name='AnalogNoiseEnabler', symbolic_trace_fn=quantlib_symbolic_trace,finder= AnalogNoiseEnablerFinder(), applier=AnalogNoiseEnablerApplier()) 
 

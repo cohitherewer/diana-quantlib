@@ -62,11 +62,12 @@ class F2FQuantiser(ComposedEditor):
                  addtreeforceoutputeps:       bool,
                  map_to_analog : bool = True 
                  ):
-        editors = [QuantLibTracer(),
+    
+        editors = [QuantLibRetracer(),
             
             ModuleWiseConverter(modulewisedescriptionspec)]  
         if map_to_analog : 
-            editors.append(AnalogConvMapper(analogcoredescriptionspec)) 
+            editors.append(AnalogConvMapper(analogcoredescriptionspec))
         editors += [ DianaF2FInterposer()  ,  
         
             
@@ -80,4 +81,6 @@ class F2FQuantiser(ComposedEditor):
             DianaQuantizerFuser() ,# ignore the harmonise adds 
            ]
        
-        super(F2FQuantiser, self).__init__( editors ) 
+        super(F2FQuantiser, self).__init__(
+            editors                   
+    ) 

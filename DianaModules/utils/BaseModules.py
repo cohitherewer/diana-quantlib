@@ -101,7 +101,7 @@ class DianaModule: # Base class for all diana models
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,DIANAReLU) : 
                 module.freeze()
-        self.clip_scales_pow2()
+        #self.clip_scales_pow2()
         converter = HWMappingConverter(custom_editor=custom_editors)
         x, _ = self.train_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
@@ -272,8 +272,9 @@ class DianaModule: # Base class for all diana models
         my_module = importlib.import_module("torch.optim")
         MyClass = getattr(my_module, type) 
         self.optimizer = MyClass(self.gmodule.parameters() , *args, **kwargs) 
+    
     def initialize_quantization(self, count = 400): 
-        self.gmodule = self.gmodule.to('cpu')
+        print("starting initialization process on " ,DianaModule.device )
         self.start_observing()
         # put count validation data samples through and initialize quantization hyperparameters 
         # do this in CPU 
@@ -282,14 +283,13 @@ class DianaModule: # Base class for all diana models
             x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
     
             if len(x.shape) == 3 : 
-                x = x.unsqueeze(0)
+                x = x.unsqueeze(0).to(DianaModule.device)
                 _ = self.gmodule(x) 
         self.stop_observing() 
        
         
 
     def evaluate_model(self, criterion=nn.CrossEntropyLoss() , batch_size=128) : 
-        self.gmodule.to(DianaModule.device)
         self.gmodule.eval () 
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=batch_size, shuffle=True  ,pin_memory=True)}
         running_loss = 0 
