@@ -9,7 +9,6 @@ from typing import Union , Tuple
 
 
 from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qactivations import PACTReLU
-from quantlib.algorithms.qbase.observer.observers import TensorObserver
 from quantlib.algorithms.qbase.qhparams.qhparams import create_qhparams
 from quantlib.algorithms.qbase.qrange.qrange import resolve_qrangespec
 
@@ -24,6 +23,7 @@ import math
 
 from quantlib.algorithms.qbase import QRangeSpecType, QGranularitySpecType, QHParamsInitStrategySpecType
 from DianaModules.utils._FakeQuantizer import _FakeDQuantiser, _FakeAQuantiser
+
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 from quantlib.algorithms.qbase import get_zero_scale, get_scale
 
@@ -102,8 +102,7 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
                  qrangespec:               QRangeSpecType,
                  qgranularityspec:         QGranularitySpecType,
                  qhparamsinitstrategyspec: QHParamsInitStrategySpecType ,
-                 QuantizerType : IdentityType = IdentityType.default):
-
+                 QuantizerType : IdentityType = IdentityType.default ):
         super().__init__(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec) 
@@ -142,16 +141,15 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
             return 8 
 
 class DIANAReLU( PACTReLU  , DianaBaseOperation): 
-    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False , is_analog : bool = False):
-        self.is_analog = is_analog
+    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False ):
+    
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
-  
+    def call_qop(self, x: torch.Tensor) -> torch.Tensor:
+     
+        return super().call_qop(x) 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
-            if  self.is_analog:
-                self.redefine_qhparams({'bitwidth' : 24, 'signed': False})
-            else: 
-                self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
+            self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
 
             #  clip here and freeze 
           #  self.freeze() 
@@ -237,9 +235,10 @@ class AnalogConv2d(DIANAConv2d):
 
     def forward(self, x : torch.Tensor) : # returns a five dimensionsal tensor 
         x.to(self.weight.device) 
-        
+      
         group_count = 1 if self.max_channels >= x.size(1) else math.ceil(x.size(1)/self.max_channels) 
         counter = x.size(1) 
+        
         tile_size = x.size(1) if group_count <= 1 else self.max_channels
         padded_out = None
         if self._is_quantised:
@@ -274,25 +273,25 @@ class AnalogConv2d(DIANAConv2d):
             return
         else : 
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
-        self.define_bitwidth_clipping() 
+            self.define_bitwidth_clipping() 
  
 class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass randomly sample a group (except the last one ) and observe it
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, IdentityType.AIMC_OUT)
 
-    def forward(self, x : torch.Tensor):
-        if self._is_observing:
-            with torch.no_grad():
-      
-                i = randint(0, x.size(0) -1 ) 
-                self._observer.update(x[i])
+    #def forward(self, x : torch.Tensor):
+    #    if self._is_observing:
+    #        with torch.no_grad():
+    #  
+    #            i = randint(0, x.size(0) -1 ) 
+    #            self._observer.update(x[i])
 
-        if self._is_quantised:
-            x = self._call_qop(x)
-        else:
-            x = super(_QModule, self).forward(x)
+    #    if self._is_quantised:
+    #        x = self._call_qop(x)
+    #    else:
+    #        x = super(_QModule, self).forward(x)
 
-        return x 
+    #    return x 
         
 #(Partial sum ) 
 class AnalogAccumulator(nn.Module): # given a five dimensional tensor return a reduced accumulated 4d tensor 
@@ -320,7 +319,8 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
     def enable(self): 
         self.enabled = True
     def disable(self): 
-        self.enabled = True
+        self.enabled = False
+
     def forward(self , x : torch.Tensor) : 
         if self.enabled: 
             self.clip_lo  = self.clip_lo.to(x.device)

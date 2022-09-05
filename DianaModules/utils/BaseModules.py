@@ -19,7 +19,7 @@ from quantlib.editing.editing.editors.retracers import QuantLibRetracer
 from quantlib.editing.graphs.nn.harmonisedadd import HarmonisedAdd
 from .Converters import DianaF2FConverter, DianaF2TConverter
 
-from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
+from quantlib.algorithms.qmodules.qmodules.qmodules import _QActivation, _QModule
 import torch 
 import torch.fx as fx
 from torch import nn, rand
@@ -33,7 +33,7 @@ import importlib
 
 
 class DianaModule: # Base class for all diana models  
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
         graph_module.to(DianaModule.device) 
         self.gmodule = graph_module
@@ -48,12 +48,12 @@ class DianaModule: # Base class for all diana models
 
     def stop_observing(self): # before starting training with fake quantised network  
         for _ ,module in self.gmodule.named_modules():
-            if isinstance(module,_QModule) : 
+            if isinstance(module,(_QModule, HarmonisedAdd) ) : 
                 module.stop_observing()
                  
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): # before mapping scale and retraining # TODO change from new_bitwdith and signed to list of qrangespecs or an arbitary number of kwqrgs  
         for _ ,module in enumerate(self.gmodule.modules()): 
-            if (issubclass(type(module), _QModule) and issubclass(type(module), DianaBaseOperation)  and module._is_quantised) : 
+            if isinstance(module , _QModule)  and isinstance(module ,DianaBaseOperation) and module._is_quantised: 
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
     def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
@@ -76,13 +76,13 @@ class DianaModule: # Base class for all diana models
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
             ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} ,'meanstd' , 'DIANA')), # upper clip is updated during training
-            ({'types': ( 'Conv2d' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
+            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
             ({'types': ( 'Linear' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
-        analogcoredescriptionspec =  ('per-array', {'bitwidth': 8, 'signed': True} , 'meanstd')
+        analogcoredescriptionspec =  ('per-array', {'bitwidth': 8, 'signed': True} , 'meanstd' )
             
         # `AddTreeHarmoniser` argument
-        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA')
+        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA'  )  
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
         converter  =  F2FConverter(
@@ -123,20 +123,19 @@ class DianaModule: # Base class for all diana models
         pass 
 
 
-    def export_model(self): # x is an integrised tensor input is needed for validation in dory graph 
+    def export_model(self, data_folder : str): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
             raise NotImplementedError
 
         exporter = DianaExporter()
         from pathlib import Path
        
-        data_folder = Path("backend/test")
         x, _ = self.validation_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
         x = (x / self.validation_dataset['scale'] ). floor() #integrize 
-        exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder.absolute())
-        exporter.dump_features(network=self.gmodule, x=x, path=data_folder.absolute() ) 
+        exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder)
+        exporter.dump_features(network=self.gmodule, x=x, path=data_folder ) 
         pass 
     
     @classmethod
@@ -274,10 +273,7 @@ class DianaModule: # Base class for all diana models
         self.optimizer = MyClass(self.gmodule.parameters() , *args, **kwargs) 
     
     def initialize_quantization(self, count = 400): 
-        print("starting initialization process on " ,DianaModule.device )
         self.start_observing()
-        # put count validation data samples through and initialize quantization hyperparameters 
-        # do this in CPU 
         for i in range(count ): 
             idx  = randint(0 , self.validation_dataset['size'] -2 )
             x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
@@ -286,10 +282,53 @@ class DianaModule: # Base class for all diana models
                 x = x.unsqueeze(0).to(DianaModule.device)
                 _ = self.gmodule(x) 
         self.stop_observing() 
-       
-        
+    
+    def initialize_quantization_no_activation(self, count = 400): 
+        for _ , module in self.gmodule.named_modules(): 
+            if isinstance(module , _QModule) and not isinstance(module , _QActivation): 
+                module.start_observing()
+        for i in range(count ): 
+            idx  = randint(0 , self.validation_dataset['size'] -2 )
+            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
+    
+            if len(x.shape) == 3 : 
+                x = x.unsqueeze(0).to(DianaModule.device)
+                _ = self.gmodule(x) 
+        for _ , module in self.gmodule.named_modules(): 
+            if isinstance(module , _QModule) and not isinstance(module ,_QActivation): 
+                module.stop_observing()
+    def initialize_quantization_activations(self ,count =400) : 
+        for _ , module in self.gmodule.named_modules(): 
+            if isinstance(module , _QActivation): 
+                module.start_observing()
+        for i in range(count ): 
+            idx  = randint(0 , self.validation_dataset['size'] -2 )
+            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
+    
+            if len(x.shape) == 3 : 
+                x = x.unsqueeze(0).to(DianaModule.device)
+                _ = self.gmodule(x) 
+        for _ , module in self.gmodule.named_modules(): 
+            if isinstance(module ,_QActivation): 
+                module.stop_observing()
+
+
+    @classmethod
+    def return_DFS (cls,  node : fx.node.Node,  depth : int)  :
+        ls : List[fx.node.Nodes] = [] 
+        n = node
+        for i in range(depth) : 
+            users = [ u for u in n.users] 
+            if len(users) == 0: 
+                 return ls
+            ls.append(users[0]) 
+            n = users[0]
+        return ls
+            
 
     def evaluate_model(self, criterion=nn.CrossEntropyLoss() , batch_size=128) : 
+        if self._integrized: 
+            print("INTEGRIZED EVALUATION")
         self.gmodule.eval () 
         data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=batch_size, shuffle=True  ,pin_memory=True)}
         running_loss = 0 
@@ -297,6 +336,7 @@ class DianaModule: # Base class for all diana models
         for i,data in enumerate(data_loader['validate']): 
             
             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+         
             if self._integrized: 
                 x = torch.floor(x / self.validation_dataset['scale'].to(x.device)) 
             with torch.no_grad(): 

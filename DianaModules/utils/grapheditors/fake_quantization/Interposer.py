@@ -55,8 +55,8 @@ class DianaOpQuantApplier(Applier):
             type_in = IdentityType.AIMC_IN
             type_out = IdentityType.AIMC_OUT 
         qpre = DIANAIdentity({'bitwidth': 8, 'signed': True} , 'per-array', 'meanstd', type_in)
-        #qpost = AnalogOutIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd') if type_out == IdentityType.AIMC_OUT else None
-        qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd', type_out) if type_out == IdentityType.AIMC_OUT else None
+        qpost = AnalogOutIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd') if type_out == IdentityType.AIMC_OUT else None
+        #qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd', type_out) if type_out == IdentityType.AIMC_OUT else None
   
         pre_target = id_ 
         

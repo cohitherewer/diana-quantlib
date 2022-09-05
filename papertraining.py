@@ -9,20 +9,21 @@ from DianaModules.models.cifar10.LargeResnet import resnet20
 from DianaModules.utils.BaseModules import DianaModule
 from torch import nn 
 import torch.utils.data as ut
-from quantlib.algorithms.qalgorithms.qatalgorithms.pact.optimisers import PACTSGD
+from quantlib.algorithms.qalgorithms.qatalgorithms.pact.optimisers import PACTSGD, PACTAdam
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 
-from quantlib.editing.editing.tests import ILSVRC12 
+from quantlib.editing.editing.tests import ILSVRC12
+from quantlib.editing.graphs.nn.epstunnel import EpsTunnel 
 
 train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
 train_scale = torch.Tensor([2**-8]) 
 validation_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
 
-output_weights_path = str(Path("zoo/cifar10/paper/resnet20").absolute() ) 
-FP_weight = str(Path("zoo/cifar10/paper/resnet20/ResNet_FPweights.pth").absolute() ) 
+output_weights_path = str(Path("zoo/cifar10/resnet20").absolute() ) 
+FP_weight = str(Path("zoo/cifar10/resnet20/ResNet_FPweights.pth").absolute() ) 
 model = resnet20() # FP model 
-model.load_state_dict(torch.load(FP_weight)['state_dict'])
+model.load_state_dict(torch.load(FP_weight , map_location=torch.device('cuda:1'))['state_dict'])
 model.eval()
 data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(validation_dataset, batch_size=128, shuffle=True  ,pin_memory=True)}
 #print("model_acc is : " , torch.load(FP_weight)['acc'])
@@ -77,34 +78,45 @@ data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=Tru
 ## Fake quantize to mixed model 
 
 _Mixed_model = DianaModule(DianaModule.from_trained_model(model , map_to_analog=True ) ) # 8 bits only (digital core only )
-#for _ , module in _Mixed_model.named_modules(): 
-#    print(module )
 print("finished conversion") 
 _Mixed_model.attach_train_dataset(train_dataset , train_scale) 
 _Mixed_model.attach_validation_dataset(validation_dataset , train_scale) 
-_Mixed_model.gmodule.to(DianaModule.device)
-_Mixed_model.initialize_quantization()
+#_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule,device_ids=[0 , 1]).cuda()
+_Mixed_model.gmodule = _Mixed_model.gmodule.to(DianaModule.device)
+#print("PRINTING FAKE QUANTIZED MODEL")
+#for _ , module in _Mixed_model.named_modules(): 
+ #   print(module )
+#print("NOT PRINTING FAKE QUANTIZED MODEL")
+
+
+_Mixed_model.initialize_quantization_no_activation()
 _Mixed_model.map_scales(HW_Behaviour=True)
 #for _ , module in _Mixed_model.named_modules()  : 
 #    if isinstance(module, DIANAReLU) : 
 #        print("min_flor is: ", module.min_float , "max_float: " , module.max_float, " scale:  " , module.scale)  
 print("finished initialization")
 ##train 
-_Mixed_model.gmodule.to(DianaModule.device)
+
 out_path_m = output_weights_path + "/"+'ResNet_Mixedweights.pth'
 out_path = output_weights_path + "/"+'ResNet_MixedBestweights.pth'
-_Mixed_model.gmodule.load_state_dict(torch.load(out_path_m)['state_dict']) # out_path previously optimized by bound 87.24 validation
+_Mixed_model.gmodule.load_state_dict(torch.load(out_path_m, map_location=torch.device('cuda:1'))['state_dict']) # out_path previously optimized by bound 87.24 validation
+
 
 
 #_Mixed_model.clip_scales_pow2()
 
-#optimizer_p = PACTSGD(_Mixed_model.gmodule , lr=0.0004 , pact_decay = 1e-6)
 #for _ ,module in _Mixed_model.gmodule.named_modules():
 #    if isinstance(module,DIANAReLU) : 
 #        module.freeze()
-#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01, weight_decay=5e-5)#0.9114
+#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.1, weight_decay=5e-4)#0.9114
 #best_acc = 0 
-#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_m ) 
+# train without activations
+#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=1, model_save_path=out_path_m ) 
+# initialize qh param activations 
+print("initializing activations") 
+_Mixed_model.initialize_quantization_activations(3000)
+_Mixed_model.map_scales(HW_Behaviour=True)
+print("activations initialized") 
 ###for e in range(5): 
 ###    params =  DianaModule.train(_Mixed_model.gmodule,optimizer_p,data_loader, epochs=24, model_save_path=out_path_m ) 
 ###    if params['validate']['acc'][0] > best_acc: 
@@ -139,22 +151,65 @@ _Mixed_model.gmodule.load_state_dict(torch.load(out_path_m)['state_dict']) # out
 
 ##train end 
 
-print("fake quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
+#rint("evaluating fake quantized mixed model acc") 
+#print("fake quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #true quantization , validate accuracy 
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
-_Mixed_model.map_to_hw() 
-_Mixed_model.integrize_layers()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
+_Mixed_model.map_to_hw()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
+_Mixed_model.gmodule.to(DianaModule.device)
+
+
+
+bn_layer_names = {} 
+for name , mod in _Mixed_model.named_modules(): 
+    if isinstance(mod , nn.BatchNorm2d) : 
+        bn_layer_names[name] = '' 
+print("evaluating HW mapped quantized mixed model acc") 
+print(" HW mapped quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
+_Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
+_Mixed_model.integrize_layers() 
+### LOOKING for BN 
+##for node in _Mixed_model.gmodule.graph.nodes: 
+##    if node.target in bn_layer_names.keys(): 
+##        p = [p for p in node.all_input_nodes]
+##        p_acc = [p for p in p[0].all_input_nodes] 
+##        eps : EpsTunnel = _Mixed_model.gmodule.get_submodule(p_acc[0].target)
+##
+##        print(f"BN node {node.target} has predecessors ", *p , f" of type {type(_Mixed_model.gmodule.get_submodule(p[0].target))} ", f" which has predecessor epstunnel with eps_in {eps._eps_in}, and eps_out{eps._eps_out} ")
+### end 
+
+
 _Mixed_model.gmodule.to(DianaModule.device)
 print("finished integrization") 
-
-#for  name , module in _Mixed_model.named_modules(): 
-#    print(module ) 
+counter = 0
+eps_tunnel_names = {}
+for  name , module in _Mixed_model.named_modules(): 
+    if isinstance(module , EpsTunnel): 
+        eps_tunnel_names[name] = module
+        counter += 1
+print( f"found this amount of eps tunnels: {counter} ")
+for node in _Mixed_model.gmodule.graph.nodes: 
+    if node.target in eps_tunnel_names.keys(): 
+        pred = [ p for p in node.all_input_nodes]
+        USERS = [ u for u in node.users]
+    #    print(f"This eps tunnel has eps_in {eps_tunnel_names[node.target]._eps_in} and eps_out {eps_tunnel_names[node.target]._eps_out} and predecessors: " , *pred , " and users: " , *USERS)
 for node in _Mixed_model.gmodule.graph.nodes: 
     try: 
-       if isinstance(_Mixed_model.gmodule.get_submodule(node.target) , DianaBaseOperation) or node.target in ('view', 'avgpool') : 
+       if isinstance(_Mixed_model.gmodule.get_submodule(node.target) , DianaBaseOperation): 
             predecessors = [p for p in node.all_input_nodes] 
             users = [u  for u  in node.users]  
             print(f'Diana Node {node} of type {type(_Mixed_model.gmodule.get_submodule(node.target))} with predecessors: ' , *predecessors , " and users: " , *users) 
+#            for p in predecessors: 
+#                if "add" in str(p): 
+#                    pred = [p for p in p.all_input_nodes] 
+#                    up  = [ u for u in p.users]
+#
+#                    print("add has the following input nodes ", * pred ," and users: ", * up)
+#                    for tunnel in pred: 
+#                        mod = _Mixed_model.gmodule.get_submodule(tunnel.target) 
+#                        print(f"tunnel {tunnel} has eps_in {mod._eps_in} and eps_out {mod._eps_out}")
+#
+            
 
 
             #user = users[0]
@@ -166,7 +221,11 @@ for node in _Mixed_model.gmodule.graph.nodes:
     except: 
         continue 
          
+print("evaluating true quantized mixed model acc") 
 print("true quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
+data_folder = Path("backend/cifar10/resnet20")
 
+_Mixed_model.gmodule.to('cpu')
+_Mixed_model.export_model(str(data_folder.absolute()))
 
 # converted_model  = DianaModule.from_trained_model(model , map_to_analog=True) # 8 bits only (digital core only )

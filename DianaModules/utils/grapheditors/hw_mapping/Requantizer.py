@@ -17,8 +17,8 @@ from quantlib.editing.editing.editors.nnmodules.applicationpoint import NodesMap
 from quantlib.editing.editing.editors.nnmodules import NNModuleDescription, Candidates, Roles, generate_named_patterns
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.editors.nnmodules import NNSequentialPattern
-from DianaModules.utils.AnalogRequant import AnalogRequantizer
-import DianaModules.utils.DigitalRequant as dq
+from DianaModules.utils.Requantizers.AnalogRequant import AnalogRequantizer
+import DianaModules.utils.Requantizers.DigitalRequant as dq
 
 from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import RequantiserMatcher
 from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
@@ -72,7 +72,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         node_acc         = name_to_match_node['accumulator'] if 'accumulator' in name_to_match_node.keys() else None
         node_activation = name_to_match_node['activation']
         node_eps_out    = name_to_match_node['eps_out']
-
+        
         # get handles on matched `nn.Module`s
         name_to_match_module = self.pattern.name_to_match_module(nodes_map=ap, data_gm=g)
         module_eps_in     = name_to_match_module['eps_in']
@@ -110,7 +110,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             gamma_int = torch.floor( self.div_max_bitwidth *eps_in             / ( eps_out))# mul then div by self.D b
             
 
-            if gamma_int == torch.Tensor([0]) :  # truncation 
+            if  torch.all(gamma_int.eq(torch.Tensor([0]))) :  # truncation 
                 raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
             div = torch.exp2(torch.round(torch.log2(self.div_max_bitwidth  / gamma_int)))
             #print("without rounding to 2" , self.div_max_bitwidth  / gamma_int, " eps_in : " , eps_in  , " eps_out : ", eps_out) # TODO relus scales weren't pow2
@@ -131,7 +131,8 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             beta_int  = torch.floor(self.bn_bitwidth * (-mi * gamma + beta * sigma) / (sigma * eps_out))
             #print("Before factoring gamma_int is (mul/div): " , gamma_int/self.bn_bitwidth)
             #print("Before factoring beta_int is (mul/div): " , beta_int/self.bn_bitwidth)
-            gamma_int = (eps_in * gamma)             / (sigma * eps_out) #clip to power of 2
+            gamma_int = (eps_in * gamma)             / (sigma * eps_out) # clip to the power of 2 . eps_in is the ADC scale 
+
             beta_int  =( -mi * gamma + beta * sigma) / (sigma * eps_out)
             factored_power_of_2 = torch.Tensor([1])
             while True  : 

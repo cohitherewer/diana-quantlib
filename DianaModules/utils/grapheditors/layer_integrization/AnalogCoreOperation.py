@@ -40,12 +40,14 @@ analog_roles  = Roles([
         ('Requant', NNModuleDescription(class_=Requantisation, kwargs={'mul': torch.Tensor([1]) , 'add': torch.Tensor([1]), 'zero': torch.Tensor([1]) , 'n_levels': torch.Tensor([1])})),
     ])),
      ('eps_identity_out', Candidates([
+         ('',     None),  
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
      ('noise', Candidates([
         ('Noise', NNModuleDescription(class_=AnalogGaussianNoise, kwargs= {'signed':True , 'bitwidth': 6})),
     ])),# noise node 
      ('eps_noise_out', Candidates([
+         ('',     None),  
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
     ('accumulator', Candidates([
@@ -75,15 +77,13 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         
 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
-        print("ANALOG CONV FOUND ")
         # get handles on matched `fx.Node`s
         name_to_match_node = self.pattern.name_to_match_node(nodes_map=ap)
         node_eps_in  = name_to_match_node['eps_in']
         node_conv  = name_to_match_node['conv']
         node_conv_out = name_to_match_node['eps_conv_out']
-        node_identity_out= name_to_match_node['eps_identity_out'] # should have same eps in as node_conv_out epsout
-        node_noise= name_to_match_node['noise'] # TODO remove this in graph when not simulating
-        node_noise_out= name_to_match_node['eps_noise_out'] # 
+        node_noise= name_to_match_node['noise']
+        node_noise_out= name_to_match_node['eps_noise_out'] if 'eps_noise_out' in name_to_match_node.keys() else None # 
         node_accumulator  = name_to_match_node['accumulator']
 
 
@@ -93,9 +93,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         module_conv  = name_to_match_module['conv']
         module_conv_out = name_to_match_module['eps_conv_out']
       
-        module_identity_out= name_to_match_module['eps_identity_out'] # should have same eps in as node_conv_out epsout
       
-        module_noise_out= name_to_match_module['eps_noise_out'] # 
        
          # create the integerised linear operation
         new_target = id_
@@ -109,15 +107,15 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         node_conv_out.replace_input_with(node_conv, new_node)
         acc_users = [u for u in node_accumulator.users] 
         for u in acc_users: 
-            u.replace_input_with(node_accumulator , node_noise_out)
+            if node_noise_out is not None: 
+                u.replace_input_with(node_accumulator , node_noise_out)
+            else: 
+                u.replace_input_with(node_accumulator , node_noise)
 
          # .and delete conv and accumulator opertions , set epstunnels of eps_identity_out eps_out to 1 and eps_out eps_in to 1
         module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
         module_conv_out.set_eps_in(torch.ones_like(module_conv_out.eps_in))
-        module_identity_out.set_eps_out(torch.ones_like(module_identity_out.eps_out)) 
-      
-        module_noise_out.set_eps_in(torch.ones_like(module_noise_out.eps_in))
-        #module_noise_out.set_eps_out(torch.ones_like(module_noise_out.eps_out))
+        # noise  
         # noise prop 
          # ...and delete the old operation
         g.delete_submodule(node_conv.target)

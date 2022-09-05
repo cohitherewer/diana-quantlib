@@ -5,6 +5,7 @@ from DianaModules.utils.grapheditors.hw_mapping.AnalogNoiseEnabler import Analog
 
 
 from DianaModules.utils.grapheditors.hw_mapping.Requantizer import DianaRequantizer
+from DianaModules.utils.grapheditors.hw_mapping.ResAddAnalogCore import ResidualAddsAnalogCoreRewriter
 from DianaModules.utils.grapheditors.layer_integrization.AnalogCoreOperation import AnalogConvIntegrizer
 from DianaModules.utils.grapheditors.layer_integrization.LinearOpQuant import DianaLinearOpIntegrizer
 
@@ -33,15 +34,18 @@ class HWMappingConverter(ComposedEditor) :
           
             F2TAnnotator(),
             EpsTunnelInserter(),
-           
+               
+           ResidualAddsAnalogCoreRewriter() , 
           
             DianaRequantizer() 
             ]
         
         editor_post = [   
            EpsTunnelConstructSimplifier(),
+            AnalogNoiseEnabler() ,
            EpsTunnelRemover()  ,
-           AnalogNoiseEnabler() 
+            
+        
         ]
 
         super(HWMappingConverter, self).__init__(editors + custom_editor + editor_post)

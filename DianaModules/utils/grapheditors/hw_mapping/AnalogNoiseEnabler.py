@@ -6,6 +6,8 @@ import torch.fx as fx
 from DianaModules.utils.grapheditors import DianaAps
 from DianaModules.core.Operations import AnalogGaussianNoise
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
+from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
+import torch
 
 class AnalogNoiseEnablerFinder(Finder) : 
     def __init__(self) -> None:
@@ -28,6 +30,13 @@ class AnalogNoiseEnablerApplier(Applier) :
         node = ap.node
         module = g.get_submodule(node.target) 
         module.enable() 
+        # fix eps tunnels so they aren't removed in the epstunnel remover step 
+        prev_eps_tunnel : EpsTunnel= g.get_submodule([p for p in node.all_input_nodes][0].target)
+        next_eps_tunnel : EpsTunnel= g.get_submodule([u for u in node.users][0].target)
+        assert isinstance(prev_eps_tunnel, EpsTunnel) and isinstance(next_eps_tunnel , EpsTunnel) 
+        prev_eps_tunnel.set_eps_out(torch.ones_like(prev_eps_tunnel._eps_out))
+        next_eps_tunnel.set_eps_in(torch.ones_like(next_eps_tunnel._eps_in))
+
         return g 
 
 
