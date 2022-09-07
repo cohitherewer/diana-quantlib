@@ -23,16 +23,20 @@ validation_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,downl
 output_weights_path = str(Path("zoo/cifar10/resnet20").absolute() ) 
 FP_weight = str(Path("zoo/cifar10/resnet20/ResNet_FPweights.pth").absolute() ) 
 model = resnet20() # FP model 
-model.load_state_dict(torch.load(FP_weight , map_location=torch.device('cuda:1'))['state_dict'])
-model.eval()
 data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(validation_dataset, batch_size=128, shuffle=True  ,pin_memory=True)}
 #print("model_acc is : " , torch.load(FP_weight)['acc'])
-#d_model = DianaModule(model)
-#d_model.attach_train_dataset(train_dataset , train_scale) 
-#d_model.attach_validation_dataset(validation_dataset , train_scale) 
+d_model = DianaModule(model)
+d_model.gmodule = nn.DataParallel(d_model.gmodule, device_ids=[0 ,  1]).cuda() 
+d_model.gmodule.load_state_dict(torch.load(FP_weight , map_location=torch.device('cuda:0'))['state_dict'])
+d_model.gmodule.eval() 
+d_model.gmodule = d_model.gmodule.to(DianaModule.device) 
+d_model.attach_train_dataset(train_dataset , train_scale) 
+d_model.attach_validation_dataset(validation_dataset , train_scale) 
 #print("Floating point model acc: ", d_model.evaluate_model()[1])
 #training of FP model1
-#d_model.QA_iterative_train(epochs=120, batch_size=128,train_8bit_model=False, train_HW_model=False , train_HWmapped_model=False, output_weights_path=output_weights_path) 
+print("TRAINING FP MODEL") 
+#optimizer = torch.optim.SGD(d_model.gmodule.parameters(),lr = 0.01 , momentum = 0.1, weight_decay=5e-5)
+#_ = DianaModule.train(d_model.gmodule, optimizer,data_loader, epochs=120, model_save_path=FP_weight )
 
 
 # fake quanitze to 8 bits and initialize quantization then train 
@@ -97,9 +101,9 @@ _Mixed_model.map_scales(HW_Behaviour=True)
 print("finished initialization")
 ##train 
 
-out_path_m = output_weights_path + "/"+'ResNet_Mixedweights.pth'
-out_path = output_weights_path + "/"+'ResNet_MixedBestweights.pth'
-_Mixed_model.gmodule.load_state_dict(torch.load(out_path_m, map_location=torch.device('cuda:1'))['state_dict']) # out_path previously optimized by bound 87.24 validation
+out_path_FQ = output_weights_path + "/"+'ResNet_Mixedweights.pth'
+#out_path = output_weights_path + "/"+'ResNet_MixedBestweights.pth'
+#_Mixed_model.gmodule.load_state_dict(torch.load(out_path_m, map_location=torch.device('cuda:1'))['state_dict']) # out_path previously optimized by bound 87.24 validation
 
 
 
@@ -108,10 +112,10 @@ _Mixed_model.gmodule.load_state_dict(torch.load(out_path_m, map_location=torch.d
 #for _ ,module in _Mixed_model.gmodule.named_modules():
 #    if isinstance(module,DIANAReLU) : 
 #        module.freeze()
-#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.1, weight_decay=5e-4)#0.9114
+#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01, weight_decay=5e-4)#0.9114
 #best_acc = 0 
 # train without activations
-#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=1, model_save_path=out_path_m ) 
+#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=1, model_save_path=out_path_FQ ) 
 # initialize qh param activations 
 print("initializing activations") 
 _Mixed_model.initialize_quantization_activations(3000)

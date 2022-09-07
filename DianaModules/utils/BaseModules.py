@@ -33,7 +33,7 @@ import importlib
 
 
 class DianaModule: # Base class for all diana models  
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
         graph_module.to(DianaModule.device) 
         self.gmodule = graph_module

@@ -15,6 +15,9 @@ from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
 from torch import nn
 import torch 
 from DianaModules.core.Operations import AnalogAccumulator
+
+# analog core patterns 
+
 class ResidualAddsAnalogCoreFinder(Finder): # only looks for residual add pattern: 2 inputs , one of which is quantized is passed through eps_tunnel , while the other is a BN. Other cases without the BN are handles with the eps construct simplifier and epstunnel after add
     def __init__(self) -> None:
         super().__init__()
@@ -24,15 +27,22 @@ class ResidualAddsAnalogCoreFinder(Finder): # only looks for residual add patter
         for n in g .graph.nodes: 
             if ( n.op in FXOpcodeClasses.CALL_FUNCTION.value or n.op in FXOpcodeClasses.CALL_METHOD.value ) and "add" in str(n):
                 predecessors = [p for p in n.all_input_nodes]
+                assert isinstance(g.get_submodule(predecessors[0].target) , EpsTunnel) and isinstance(g.get_submodule(predecessors[1].target) , EpsTunnel)
                 if len(predecessors) <= 2: 
                     corrects = 0 
                     try: 
-                        if isinstance(g.get_submodule(predecessors[0].target)   , EpsTunnel) : 
-                            if isinstance(g.get_submodule(predecessors[1].target)   , nn.BatchNorm2d) : 
-                                aps.append(DianaAps('add' , n)) 
-                        elif isinstance(g.get_submodule(predecessors[0].target) , nn.BatchNorm2d) :  
-                            if isinstance(g.get_submodule(predecessors[1].target) , EpsTunnel) :  
-                                aps.append(DianaAps('add' , n)) 
+                        # pattern is eps tunnel - act - bn 
+                        #searching for batchnorms  need to traverse back 2 steps
+
+                        bn_candidate_0 = [p for p in [p for p in predecessors[0].all_input_nodes][0].all_input_nodes][0]
+                        bn_candidate_1 = [p for p in [p for p in predecessors[1].all_input_nodes][0].all_input_nodes][0]
+
+                        if isinstance(g.get_submodule(bn_candidate_0.target)   , nn.BatchNorm2d) : 
+                            aps.append(DianaAps('bn_0' , n)) 
+                        elif isinstance(g.get_submodule(bn_candidate_1 .target) , nn.BatchNorm2d) :  
+                            aps.append(DianaAps('bn_1' , n)) 
+
+
                     except: 
                         continue               
         return aps 
@@ -48,9 +58,29 @@ class ResidualAddsAnalogCoreApplier(Applier):
         node = ap.node
         predecessors = [p for p in node.all_input_nodes]
         assert (len(predecessors) <=2) 
+
         users = [u for u in node.users] 
-        node_tunnel =  next((n for n in predecessors if isinstance(g.get_submodule(n.target) ,EpsTunnel)), None)
-        node_bn=  next((n for n in predecessors if isinstance(g.get_submodule(n.target) ,nn.BatchNorm2d)), None)
+
+        if ap.type == 'bn_0':
+            node_act = [p for p in predecessors[0].all_input_nodes][0] 
+            eps_tunnel_node = predecessors[0]
+            node_bn = [p for p in node_act.all_input_nodes][0]
+            node_tunnel =  predecessors[1]
+            # replace add input and delete eps tunnel and activation 
+            
+
+        elif ap.type == 'bn_1' : 
+            node_act = [p for p in predecessors[1].all_input_nodes][0] 
+            eps_tunnel_node = predecessors[1]
+            node_bn = [p for p in [p for p in predecessors[1].all_input_nodes][0].all_input_nodes][0]
+            node_tunnel =  predecessors[0]
+        
+        node.replace_input_with(eps_tunnel_node , node_bn) 
+        g.delete_submodule(node_act.target)
+        g.delete_submodule(eps_tunnel_node.target)
+        g.graph.erase_node(eps_tunnel_node)
+        g.graph.erase_node(node_act)
+
         module_tunnel : EpsTunnel = g.get_submodule(node_tunnel.target)
         module_bn = g.get_submodule(node_bn.target)
         # absorb the scale from the adc 

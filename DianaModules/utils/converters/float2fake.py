@@ -72,12 +72,12 @@ class F2FQuantiser(ComposedEditor):
         
             
             
-            #QuantLibHarmonisedAddRetracer(),
-            #AddTreeHarmoniser(
-            #    addtreeqdescriptionspec,
-            #    addtreeforceoutputeps
-            #),
-            #QuantLibRetracer()  ,
+            QuantLibHarmonisedAddRetracer(),
+            AddTreeHarmoniser(
+                addtreeqdescriptionspec,
+                addtreeforceoutputeps
+            ),
+            QuantLibRetracer()  ,
            DianaQuantizerFuser() ,# ignore the harmonise adds 
            ]
        
