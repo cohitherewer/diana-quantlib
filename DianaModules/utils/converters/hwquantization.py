@@ -35,15 +35,16 @@ class HWMappingConverter(ComposedEditor) :
             F2TAnnotator(),
             EpsTunnelInserter(),
                
-           ResidualAddsAnalogCoreRewriter() , 
-          
-            DianaRequantizer() 
+            
+            ResidualAddsAnalogCoreRewriter() ,  
+            DianaRequantizer()  , 
+            
             ]
         
         editor_post = [   
-           EpsTunnelConstructSimplifier(),
-            AnalogNoiseEnabler() ,
-           EpsTunnelRemover()  ,
+             EpsTunnelConstructSimplifier(),
+           AnalogNoiseEnabler() ,
+          EpsTunnelRemover()  ,
             
         
         ]

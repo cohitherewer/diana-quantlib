@@ -1,4 +1,5 @@
 r"""Neural network layers are mapped to standard pytorch models in preparation for model export noise nodes are moved """
+from DianaModules.utils.grapheditors.hw_mapping.Requantizer import DianaRequantizer
 from DianaModules.utils.grapheditors.layer_integrization.AnalogCoreOperation import AnalogConvIntegrizer
 from DianaModules.utils.grapheditors.layer_integrization.AnalogNoiseDisabler import AnalogNoiseDisabler
 from DianaModules.utils.grapheditors.layer_integrization.LinearOpQuant import DianaLinearOpIntegrizer
@@ -17,8 +18,11 @@ class LayerIntegrizationConverter(ComposedEditor) :
     def __init__(self):
         super().__init__([AnalogNoiseDisabler () , # removed by onnx-runtime in exported onnx
    
+            
         AnalogConvIntegrizer(),
         DianaLinearOpIntegrizer() ,
+        
+            
        EpsTunnelConstructSimplifier() ,
        EpsTunnelRemover()
           ]) 

@@ -5,37 +5,41 @@ import torchvision
 import torchvision.datasets as ds  
 import torch
 from DianaModules.core.Operations import AnalogConv2d, DIANAReLU, DianaBaseOperation 
-from DianaModules.models.cifar10.LargeResnet import resnet20
+from DianaModules.models.cifar10.LargeResnet import resnet20, test
 from DianaModules.utils.BaseModules import DianaModule
 from torch import nn 
 import torch.utils.data as ut
 from quantlib.algorithms.qalgorithms.qatalgorithms.pact.optimisers import PACTSGD, PACTAdam
-from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
+from quantlib.algorithms.qmodules.qmodules.qmodules import _QActivation, _QModule
 
 from quantlib.editing.editing.tests import ILSVRC12
 from quantlib.editing.graphs.nn.epstunnel import EpsTunnel 
 
 train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-train_scale = torch.Tensor([2**-8]) 
-validation_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
+train_scale = torch.Tensor([0.0296]) # mean std
+#train_scale = torch.Tensor([0.0217]) # minmax
+test_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
 
 output_weights_path = str(Path("zoo/cifar10/resnet20").absolute() ) 
 FP_weight = str(Path("zoo/cifar10/resnet20/ResNet_FPweights.pth").absolute() ) 
 model = resnet20() # FP model 
-data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(validation_dataset, batch_size=128, shuffle=True  ,pin_memory=True)}
-#print("model_acc is : " , torch.load(FP_weight)['acc'])
-d_model = DianaModule(model)
-d_model.gmodule = nn.DataParallel(d_model.gmodule, device_ids=[0 ,  1]).cuda() 
-d_model.gmodule.load_state_dict(torch.load(FP_weight , map_location=torch.device('cuda:0'))['state_dict'])
-d_model.gmodule.eval() 
-d_model.gmodule = d_model.gmodule.to(DianaModule.device) 
-d_model.attach_train_dataset(train_dataset , train_scale) 
-d_model.attach_validation_dataset(validation_dataset , train_scale) 
+#model = nn.DataParallel(model, device_ids=[0 ,  1]).cuda() 
+#model.load_state_dict(DianaModule.remove_data_parallel(torch.load(FP_weight)['state_dict']))
+#model.eval()
+data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(test_dataset, batch_size=128, shuffle=True  ,pin_memory=True)}
+#print("FP _ model_acc is : " , torch.load(FP_weight)['acc'])
+#d_model = DianaModule(model) 
+#d_model.gmodule = nn.DataParallel(d_model.gmodule, device_ids=[0 ,  1]).cuda() 
+#d_model.gmodule = d_model.gmodule.to(DianaModule.device) 
+#d_model.attach_train_dataset(train_dataset , train_scale) 
+#d_model.attach_validation_dataset(test_dataset, train_scale) 
+
 #print("Floating point model acc: ", d_model.evaluate_model()[1])
+
 #training of FP model1
-print("TRAINING FP MODEL") 
-#optimizer = torch.optim.SGD(d_model.gmodule.parameters(),lr = 0.01 , momentum = 0.1, weight_decay=5e-5)
+#print("TRAINING FP MODEL") 
+#optimizer = torch.optim.SGD(d_model.gmodule.parameters(),lr = 0.001 ,momentum=0.9, weight_decay=5e-5)
 #_ = DianaModule.train(d_model.gmodule, optimizer,data_loader, epochs=120, model_save_path=FP_weight )
 
 
@@ -84,7 +88,7 @@ print("TRAINING FP MODEL")
 _Mixed_model = DianaModule(DianaModule.from_trained_model(model , map_to_analog=True ) ) # 8 bits only (digital core only )
 print("finished conversion") 
 _Mixed_model.attach_train_dataset(train_dataset , train_scale) 
-_Mixed_model.attach_validation_dataset(validation_dataset , train_scale) 
+_Mixed_model.attach_validation_dataset(test_dataset , train_scale) 
 #_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule,device_ids=[0 , 1]).cuda()
 _Mixed_model.gmodule = _Mixed_model.gmodule.to(DianaModule.device)
 #print("PRINTING FAKE QUANTIZED MODEL")
@@ -93,17 +97,20 @@ _Mixed_model.gmodule = _Mixed_model.gmodule.to(DianaModule.device)
 #print("NOT PRINTING FAKE QUANTIZED MODEL")
 
 
-_Mixed_model.initialize_quantization_no_activation()
+_Mixed_model.initialize_quantization_no_activation(1)
 _Mixed_model.map_scales(HW_Behaviour=True)
 #for _ , module in _Mixed_model.named_modules()  : 
 #    if isinstance(module, DIANAReLU) : 
 #        print("min_flor is: ", module.min_float , "max_float: " , module.max_float, " scale:  " , module.scale)  
-print("finished initialization")
+#print("finished linear layer initialization")
+#print("FQ_model Linear Layers Quantized Before Training", _Mixed_model.evaluate_model()[1])
 ##train 
 
-out_path_FQ = output_weights_path + "/"+'ResNet_Mixedweights.pth'
+out_path_FQ = output_weights_path + "/"+'ResNet_LinearLayerQuantized.pth'
+out_path_FQ_A = output_weights_path + "/"+'ResNet_ActQuantized.pth'
+out_path_FQ_A_test= output_weights_path + "/"+'ResNet_ActQuantizedTest.pth'
 #out_path = output_weights_path + "/"+'ResNet_MixedBestweights.pth'
-#_Mixed_model.gmodule.load_state_dict(torch.load(out_path_m, map_location=torch.device('cuda:1'))['state_dict']) # out_path previously optimized by bound 87.24 validation
+#_Mixed_model.gmodule.load_state_dict(torch.load(out_path_FQ, map_location=torch.device('cuda:0'))['state_dict']) # out_path previously optimized by bound 87.24 validation
 
 
 
@@ -112,15 +119,34 @@ out_path_FQ = output_weights_path + "/"+'ResNet_Mixedweights.pth'
 #for _ ,module in _Mixed_model.gmodule.named_modules():
 #    if isinstance(module,DIANAReLU) : 
 #        module.freeze()
-#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01, weight_decay=5e-4)#0.9114
+
+print("Starting FQ training Linear Layer")
+#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.001,  weight_decay=5e-6)
 #best_acc = 0 
 # train without activations
-#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=1, model_save_path=out_path_FQ ) 
+#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_FQ ) 
 # initialize qh param activations 
+#print("FQ_model Linear Layers Quantized After Training", _Mixed_model.evaluate_model()[1])
 print("initializing activations") 
-_Mixed_model.initialize_quantization_activations(3000)
+_Mixed_model.initialize_quantization_activations(1)
 _Mixed_model.map_scales(HW_Behaviour=True)
 print("activations initialized") 
+#_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule).cuda()
+#_Mixed_model.gmodule.load_state_dict(torch.load(out_path_FQ_A, map_location=torch.device('cuda:0'))['state_dict']) # for training
+_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(out_path_FQ_A )['state_dict']) )# cpu
+_Mixed_model.gmodule.to(DianaModule.device)
+_Mixed_model.clip_scales_pow2()
+#print("FQ_model Activations Quantized Before Training", _Mixed_model.evaluate_model()[1])
+
+#train 
+#optimizer = torch.optim.Adam(_Mixed_model.gmodule.parameters(), lr = 0.0001, weight_decay=5e-5)
+#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_FQ_A_test ) 
+# train end
+#print("FQ_model Activations Quantized After Training", _Mixed_model.evaluate_model()[1])
+
+
+
+
 ###for e in range(5): 
 ###    params =  DianaModule.train(_Mixed_model.gmodule,optimizer_p,data_loader, epochs=24, model_save_path=out_path_m ) 
 ###    if params['validate']['acc'][0] > best_acc: 
@@ -160,16 +186,22 @@ print("activations initialized")
 #true quantization , validate accuracy 
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
 _Mixed_model.map_to_hw()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
+
 _Mixed_model.gmodule.to(DianaModule.device)
 
 
 
-bn_layer_names = {} 
-for name , mod in _Mixed_model.named_modules(): 
-    if isinstance(mod , nn.BatchNorm2d) : 
-        bn_layer_names[name] = '' 
-print("evaluating HW mapped quantized mixed model acc") 
-print(" HW mapped quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
+
+#print("evaluating HW mapped quantized mixed model acc") 
+print(" HW mapped quantized before training mixed model acc: ", _Mixed_model.evaluate_model()[1])
+#train hw-mapped 
+_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule).cuda() 
+_Mixed_model.gmodule.to(DianaModule.device)
+out_path_HWmapped= output_weights_path + "/"+'ResNet_HWMapped.pth'
+optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01 , weight_decay=5e-4)
+params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_HWmapped , integrized = True , scale =train_scale.to(DianaModule.device) ) 
+#train end 
+print(" HW mapped quantized after training mixed model acc: ", _Mixed_model.evaluate_model()[1])
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
 _Mixed_model.integrize_layers() 
 ### LOOKING for BN 

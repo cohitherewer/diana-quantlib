@@ -14,10 +14,12 @@ class MulAdd(Requantisation) :
         self.register_buffer("mul", mul) # scale 
         self.register_buffer("add", add)
 
-        self.qop = MulAddOp.apply
+       # self.qop = MulAddOp.apply
         
     def forward(self , x : torch.Tensor) -> torch.Tensor: 
-        return self.qop(x,self.mul , self.add )  
+        with torch.autograd.set_detect_anomaly(True): 
+            return self.mul * x + self.add 
+        #return self.qop(x,self.mul , self.add )  
      
 # to ensure correct format in onnx file 
 class MulAddOp(torch.autograd.Function):

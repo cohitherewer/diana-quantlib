@@ -113,8 +113,9 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             if  torch.all(gamma_int.eq(torch.Tensor([0]))) :  # truncation 
                 raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
             div = torch.exp2(torch.round(torch.log2(self.div_max_bitwidth  / gamma_int)))
-            #print("without rounding to 2" , self.div_max_bitwidth  / gamma_int, " eps_in : " , eps_in  , " eps_out : ", eps_out) # TODO relus scales weren't pow2
-            #print("with rounding to 2" ,  torch.exp2(torch.round(torch.log2(self.div_max_bitwidth  / gamma_int))))
+          #  print("without rounding to 2" , self.div_max_bitwidth  / gamma_int, " eps_in : " , eps_in  , " eps_out : ", eps_out) # TODO relus scales weren't pow2
+            #print("Maximum difference between without rounding and rounding: " ,  torch.max(torch.abs(torch.exp2(torch.round(torch.log2(self.div_max_bitwidth  / gamma_int))) - self.div_max_bitwidth  / gamma_int)) , f" for activation node: {node_activation}")
+           
             new_module = dq.DigitalRequantizer( div=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
         else: 
             # for onnx graph generation later 

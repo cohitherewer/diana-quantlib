@@ -2,6 +2,7 @@
 #Abstract class which all diana specific module have to inhereit from 
 from abc import abstractmethod
 from cProfile import run
+from collections import OrderedDict
 from math import log2, floor
 from random import randint
 from typing import Any, Dict, List, Union
@@ -14,6 +15,7 @@ from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
 from DianaModules.utils.converters.float2fake import F2FConverter
 from DianaModules.utils.converters.hwquantization import HWMappingConverter
 from DianaModules.utils.onnx import DianaExporter
+from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qmodules import _PACTActivation
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
 from quantlib.editing.graphs.nn.harmonisedadd import HarmonisedAdd
@@ -57,7 +59,8 @@ class DianaModule: # Base class for all diana models
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
     def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
-            if issubclass(type(module), _QModule) and  not isinstance(module, AnalogConv2d) and module._is_quantised: 
+            if issubclass(type(module),_QActivation )and module._is_quantised: 
+
                 module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
                
             elif (issubclass(type(module),DianaModule) and self is not module) : 
@@ -98,27 +101,23 @@ class DianaModule: # Base class for all diana models
     
     def map_to_hw(self , custom_editors : List[Editor]=[])  : 
         # free relus upper boun d
-        for _ ,module in self.gmodule.named_modules():
-            if isinstance(module,DIANAReLU) : 
-                module.freeze()
-        #self.clip_scales_pow2()
+        
+        
         converter = HWMappingConverter(custom_editor=custom_editors)
-        x, _ = self.train_dataset['dataset'].__getitem__(0)
+        x, _ = self.validation_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
-        
-        self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataset['scale']}})
+        with torch.no_grad(): 
+            self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}})
         self._integrized = True
     def integrize_layers(self)    : 
-        for _ ,module in self.gmodule.named_modules():
-            if isinstance(module,DIANAReLU) : 
-                module.freeze()
+        
         converter = LayerIntegrizationConverter()
-        x, _ = self.train_dataset['dataset'].__getitem__(0)
+        x, _ = self.validation_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
-        
-        self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataset['scale']}})
+        with torch.no_grad(): 
+            self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}})
         self._integrized = True
         pass 
 
@@ -161,7 +160,7 @@ class DianaModule: # Base class for all diana models
         self.validation_dataset['size'] = len(dataset ) 
 
     @classmethod
-    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None , model_save_path : str = None ): 
+    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None , model_save_path : str = None , integrized = False , scale : torch.Tensor = None ): 
         metrics = {'train': {'loss': [], 'acc': []} , 'validate': {'loss': [], 'acc': []} }
         max_val_acc = 0 
         assert (model and optimizer) 
@@ -177,6 +176,8 @@ class DianaModule: # Base class for all diana models
                 for i,data in enumerate(data_loader[stage]): 
                     
                     x , y = data[0].to(cls.device), data[1].to(cls.device)
+                    if integrized: 
+                        x = torch.floor(x / scale)
                     optimizer.zero_grad() 
                     if stage == 'validate': 
                         with torch.no_grad(): 
@@ -353,4 +354,13 @@ class DianaModule: # Base class for all diana models
         e_loss = running_loss / len(data_loader['validate'].dataset)
         e_acc = running_correct / len(data_loader['validate'].dataset) 
         return e_loss , e_acc 
-       
+
+    @classmethod
+    def remove_data_parallel(cls,old_state_dict):
+        new_state_dict = OrderedDict()
+
+        for k, v in old_state_dict.items():
+            name = k[7:] # remove `module.`
+            new_state_dict[name] = v
+    
+        return new_state_dict

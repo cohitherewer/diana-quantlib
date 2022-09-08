@@ -3,15 +3,9 @@ import torch
 from torch import nn 
 from torchvision.models import resnet18, ResNet18_Weights
 from DianaModules.utils.BaseModules import DianaModule
-from pathlib import Path 
-from torch.utils.data import Dataset
 
-from torchvision.io import read_image
-import pandas as pd 
-import os
 
-imagenet_train_path = str(Path("../../projectdata/datasets/imagenet/small/train").absolute() ) 
-imagenet_val_path = str(Path("../../projectdata/datasets/imagenet/small/train").absolute() ) 
+
 
 fp_model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V2)
 

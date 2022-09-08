@@ -1,4 +1,3 @@
-
 from DianaModules.utils.Requantizers.muladd import MulAdd
 from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 
@@ -60,19 +59,22 @@ class ResidualAddsAnalogCoreApplier(Applier):
         assert (len(predecessors) <=2) 
 
         users = [u for u in node.users] 
-
+        
         if ap.type == 'bn_0':
-            node_act = [p for p in predecessors[0].all_input_nodes][0] 
             eps_tunnel_node = predecessors[0]
+            node_act = [p for p in eps_tunnel_node.all_input_nodes][0] 
+            activation_eps = g.get_submodule(eps_tunnel_node.target).eps_out.clone().detach()  
             node_bn = [p for p in node_act.all_input_nodes][0]
             node_tunnel =  predecessors[1]
+
             # replace add input and delete eps tunnel and activation 
             
 
         elif ap.type == 'bn_1' : 
-            node_act = [p for p in predecessors[1].all_input_nodes][0] 
             eps_tunnel_node = predecessors[1]
-            node_bn = [p for p in [p for p in predecessors[1].all_input_nodes][0].all_input_nodes][0]
+            node_act = [p for p in eps_tunnel_node.all_input_nodes][0] 
+            activation_eps = g.get_submodule(eps_tunnel_node.target).eps_out.clone().detach()  
+            node_bn = [p for p in node_act.all_input_nodes][0]
             node_tunnel =  predecessors[0]
         
         node.replace_input_with(eps_tunnel_node , node_bn) 
@@ -100,11 +102,15 @@ class ResidualAddsAnalogCoreApplier(Applier):
                 eps_module = e_mod 
             if isinstance(eps_module, EpsTunnel):
                 eps_in = eps_module._eps_out.clone().detach() 
-                eps_module.set_eps_out(torch.ones_like(eps_module._eps_out)) 
+                eps_module.set_eps_out(torch.ones_like(eps_module.eps_out)) 
             
         except: 
             pass 
-        #compute mul add with the scale 
+    
+        #compute mul add with the scale also absorb the eps tunnel of activation that followed BN to match the other eps_tunnel 
+        match_factor =  activation_eps/module_tunnel.eps_out  # factor to be absorbed into batchnorm 
+        absorbed_factor = match_factor / activation_eps
+        tunnel_eps_out = module_tunnel.eps_out.clone().detach() 
         assert(node_tunnel is not None and node_bn is not None)
         
         shape = node_bn.meta['tensor_meta'].shape
@@ -120,8 +126,9 @@ class ResidualAddsAnalogCoreApplier(Applier):
 
         # Mul gamma / sigma 
         # Add beta    = module_bn.bias
-        mul = eps_in *gamma /sigma 
-        add =(-mi * gamma + beta * sigma) / (sigma ) 
+        mul = eps_in *gamma /sigma  * absorbed_factor
+        add =(-mi * gamma + beta * sigma) / (sigma) * absorbed_factor
+   
         factored_power_of_2 = torch.Tensor([1])
         while True  : 
             max_multiplier = torch.max(torch.maximum(torch.abs(mul ), torch.abs(add )))
@@ -130,7 +137,7 @@ class ResidualAddsAnalogCoreApplier(Applier):
 
                 factored_power_of_2 -=1
                 break 
-            
+    
         add =torch.floor( torch.exp2(factored_power_of_2) *  add )
         mul = torch.floor(torch.exp2(factored_power_of_2) * mul ) 
         # add new Mul add module and delete batch norm 
@@ -145,17 +152,29 @@ class ResidualAddsAnalogCoreApplier(Applier):
 
         # Shift other input of addition by scale and insert eps tunnel after the addition 
         scale_factor = torch.exp2(factored_power_of_2)
-        module_tunnel.set_eps_out(torch.clamp(torch.exp2(torch.round(torch.log2(module_tunnel._eps_out *scale_factor) )), min=torch.Tensor([1])))
+        #module_tunnel.set_eps_out(torch.clamp(torch.exp2(torch.round(torch.log2(module_tunnel._eps_out *scale_factor) )), min=torch.Tensor([1])))
+        module_tunnel.set_eps_out(torch.clamp(scale_factor, min=torch.Tensor([1])))
         #print("Module_tunnel scale: " , module_tunnel._eps_out) 
         
-        eps_out_target = id_ +  f'[{str(self._counter)}]'
-        new_module = EpsTunnel(torch.Tensor([1]))
-        new_module.set_eps_in(scale_factor)
-        g.add_submodule(eps_out_target , new_module)
-        with g.graph.inserting_after(node): 
-            out_eps_node = g.graph.call_module(eps_out_target, (node, )) 
+        
         for u in users: 
-            u.replace_input_with(node , out_eps_node)
+            try: 
+                candidate = g.get_submodule(u.target)
+                if not isinstance(candidate, EpsTunnel): 
+                    eps_out_target = id_ +  f'[{str(self._counter)}]'
+                    new_module = EpsTunnel(torch.Tensor([1]))
+                 
+                    new_module.set_eps_out(tunnel_eps_out/scale_factor)
+                    g.add_submodule(eps_out_target , new_module)
+                    with g.graph.inserting_after(node): 
+                        out_eps_node = g.graph.call_module(eps_out_target, (node, )) 
+                    u.replace_input_with(node , out_eps_node)
+                else: 
+                    print("TUNNEL ALREADY EXISTS ")
+                    candidate.set_eps_in(torch.ones_like(candidate.eps_in) ) 
+                    candidate.set_eps_out(torch.ones_like(candidate.eps_out) * tunnel_eps_out/scale_factor) 
+            except: 
+                pass 
         return g 
 
 class ResidualAddsAnalogCoreRewriter(Rewriter) : 

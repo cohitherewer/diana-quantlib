@@ -13,10 +13,13 @@ class AnalogRequantizer(Requantisation): # # neeed to inhereit from requantisati
         self.register_buffer("clip_hi", zero + n_levels-1)
         self.register_buffer("mul", mul)
         self.register_buffer("add", add )
-        self.qop = AnalogQuantOp.apply
+        #self.qop = AnalogQuantOp.apply
         
     def forward(self , x : torch.Tensor): 
-        return self.qop(x , self.div,self.clip_lo, self.clip_hi,self.mul , self.add ) 
+        out = torch.floor((x *self.mul + self.add) / self.div)
+        return torch.clip( out, min=self.clip_lo , max=self.clip_hi) 
+
+        #return self.qop(x , self.div,self.clip_lo, self.clip_hi,self.mul , self.add ) 
      
 
 class AnalogQuantOp(torch.autograd.Function):
