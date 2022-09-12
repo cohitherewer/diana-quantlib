@@ -16,6 +16,7 @@ class _FakeDQuantiser(torch.autograd.Function): # symmetric quantisation
         
         x = x * (step * scale)
         return x 
+        
 
     @staticmethod
     def backward(   ctx, g_in ) : # straight through estimator 

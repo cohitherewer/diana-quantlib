@@ -20,7 +20,7 @@ class LayerIntegrizationConverter(ComposedEditor) :
    
             
         AnalogConvIntegrizer(),
-        DianaLinearOpIntegrizer() ,
+        DianaLinearOpIntegrizer() , #problem is hereee
         
             
        EpsTunnelConstructSimplifier() ,

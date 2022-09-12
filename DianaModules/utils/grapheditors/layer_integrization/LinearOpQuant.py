@@ -66,13 +66,13 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
             raise RuntimeError
 
         new_module.register_buffer("is_analog" , torch.Tensor([False]))  
-        iweight = torch.round(qlinear.qweight.data.clone().detach() / qlinear.scale.data.clone().detach())  # integerised parameters
+        iweight = qlinear.qweight.data.clone().detach() #/ qlinear.scale.data.clone().detach())  # integerised parameters
         new_module.weight.data = iweight
 
         if qlinear.bias is not None: 
            
-            new_module.bias.data = qlinear.bias.data.clone().detach() .round() 
-            new_module.bias.type(torch.int32)
+            new_module.bias.data = qlinear.bias.data.clone().detach()# .round() 
+            #new_module.bias.type(torch.int32)
             
             
         return new_module
@@ -101,8 +101,8 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
             new_node = g.graph.call_module(new_target, args=(node_eps_in,))
         node_eps_out.replace_input_with(node_linear, new_node)
 
-        module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
-        module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
+        #module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
+       # module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
 
         # ...and delete the old operation
         g.delete_submodule(node_linear.target)
@@ -120,7 +120,7 @@ di_roles = Roles([
     ])),
 
     ('linear', Candidates([
-       ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
+       #('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
         ('QConv2d', NNModuleDescription(class_=DIANAConv2d , kwargs={'qrangespec':{'bitwidth': 8  , 'signed': True} , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd','in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True})) #TODO problem here 
     ])),
 

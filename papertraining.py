@@ -184,22 +184,23 @@ _Mixed_model.clip_scales_pow2()
 #rint("evaluating fake quantized mixed model acc") 
 #print("fake quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #true quantization , validate accuracy 
+out_path_HWmapped= output_weights_path + "/"+'ResNet_HWMapped.pth'
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
 _Mixed_model.map_to_hw()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
 
 _Mixed_model.gmodule.to(DianaModule.device)
-
+_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(out_path_HWmapped )['state_dict']))
 
 
 
 #print("evaluating HW mapped quantized mixed model acc") 
-print(" HW mapped quantized before training mixed model acc: ", _Mixed_model.evaluate_model()[1])
+#print(" HW mapped quantized before training mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #train hw-mapped 
-_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule).cuda() 
-_Mixed_model.gmodule.to(DianaModule.device)
-out_path_HWmapped= output_weights_path + "/"+'ResNet_HWMapped.pth'
-optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01 , weight_decay=5e-4)
-params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_HWmapped , integrized = True , scale =train_scale.to(DianaModule.device) ) 
+#_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule).cuda() 
+#_Mixed_model.gmodule.to(DianaModule.device)
+
+#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01 , weight_decay=5e-4)
+#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=60, model_save_path=out_path_HWmapped , integrized = True , scale =train_scale.to(DianaModule.device) ) 
 #train end 
 print(" HW mapped quantized after training mixed model acc: ", _Mixed_model.evaluate_model()[1])
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
@@ -262,6 +263,6 @@ print("true quantized mixed model acc: ", _Mixed_model.evaluate_model()[1])
 data_folder = Path("backend/cifar10/resnet20")
 
 _Mixed_model.gmodule.to('cpu')
-_Mixed_model.export_model(str(data_folder.absolute()))
+#_Mixed_model.export_model(str(data_folder.absolute()))
 
 # converted_model  = DianaModule.from_trained_model(model , map_to_analog=True) # 8 bits only (digital core only )
