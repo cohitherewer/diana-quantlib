@@ -31,7 +31,7 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
         super(DianaLinearOpIntegrizerApplier, self).__init__(pattern)
 
     @staticmethod
-    def from_qlinear(qlinear: _QModule) -> nn.Module:
+    def from_qlinear(qlinear: _QModule, module_out_eps_in) -> nn.Module:
         """Return an ``nn.Module`` implementing a linear operation with
         integerised parameters.
         """
@@ -61,18 +61,22 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
                                 dilation=qlinear.dilation,
                                 groups=qlinear.groups,
                                 bias=(qlinear.bias is not None))
+                    
         
         else:
             raise RuntimeError
-
+    
         new_module.register_buffer("is_analog" , torch.Tensor([False]))  
-        iweight = qlinear.qweight.data.clone().detach() #/ qlinear.scale.data.clone().detach())  # integerised parameters
+       
+        iweight = torch.round(qlinear.qweight.clone().detach()/qlinear.scale.data.clone().detach())  # integerised parameters
+        
         new_module.weight.data = iweight
 
         if qlinear.bias is not None: 
-           
-            new_module.bias.data = qlinear.bias.data.clone().detach()# .round() 
-            #new_module.bias.type(torch.int32)
+            new_bias = (qlinear.bias.data.clone().detach() / module_out_eps_in.view(-1 , 1).squeeze().data.clone().detach()).round() 
+            new_module.bias.data = new_bias
+          
+            new_module.bias.type(torch.int32)
             
             
         return new_module
@@ -93,16 +97,21 @@ class DianaLinearOpIntegrizerApplier(NNModuleApplier):
 
         # create the integerised linear operation
         new_target = id_
-        new_module = DianaLinearOpIntegrizerApplier.from_qlinear(module_linear)
+    
+        new_module = DianaLinearOpIntegrizerApplier.from_qlinear(module_linear , module_eps_out.eps_in)
 
         # add the requantised linear operation to the graph...
         g.add_submodule(new_target, new_module)
         with g.graph.inserting_after(node_eps_in):
             new_node = g.graph.call_module(new_target, args=(node_eps_in,))
         node_eps_out.replace_input_with(node_linear, new_node)
+       # print("eps in: " , module_eps_in.eps_out)
+        #print("module scale: " , module_linear.scale)
+        #print("eps_out after conv: " , module_eps_out.eps_in)
+        #print("eps_out after conv /module scale  (should be equal to eps in ): " , module_eps_out.eps_in / module_linear.scale)
 
-        #module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
-       # module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
+        module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
+        module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
 
         # ...and delete the old operation
         g.delete_submodule(node_linear.target)
@@ -120,7 +129,7 @@ di_roles = Roles([
     ])),
 
     ('linear', Candidates([
-       #('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
+       ('QLinear', NNModuleDescription(class_=nn.Linear, kwargs={'in_features': 1, 'out_features': 1, 'bias': True})) , 
         ('QConv2d', NNModuleDescription(class_=DIANAConv2d , kwargs={'qrangespec':{'bitwidth': 8  , 'signed': True} , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd','in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True})) #TODO problem here 
     ])),
 

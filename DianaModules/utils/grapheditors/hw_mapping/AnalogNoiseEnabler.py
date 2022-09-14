@@ -29,7 +29,7 @@ class AnalogNoiseEnablerApplier(Applier) :
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
         node = ap.node
         module = g.get_submodule(node.target) 
-        module.enable() 
+        #module.enable() #TODO UNCOMMENT THIS LINEE LATER
         # fix eps tunnels so they aren't removed in the epstunnel remover step 
         prev_eps_tunnel : EpsTunnel= g.get_submodule([p for p in node.all_input_nodes][0].target)
         next_eps_tunnel : EpsTunnel= g.get_submodule([u for u in node.users][0].target)

@@ -5,12 +5,13 @@ from cProfile import run
 from collections import OrderedDict
 from math import log2, floor
 from random import randint
+import sched
 from typing import Any, Dict, List, Union
 
 import matplotlib as plt
 from numpy import isin 
 
-from DianaModules.core.Operations import AnalogConv2d, DIANAReLU, DianaBaseOperation
+from DianaModules.core.Operations import AnalogConv2d, AnalogOutIdentity, DIANAConv2d, DIANAIdentity, DIANAReLU, DianaBaseOperation
 from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
 from DianaModules.utils.converters.float2fake import F2FConverter
 from DianaModules.utils.converters.hwquantization import HWMappingConverter
@@ -59,12 +60,15 @@ class DianaModule: # Base class for all diana models
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
     def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
-            if issubclass(type(module),_QActivation )and module._is_quantised: 
-
+            if issubclass(type(module),_QActivation )and module._is_quantised and type(module) != AnalogOutIdentity: # (type(module) == DIANAIdentity or type(module)==DIANAReLU) : # only clip scale of input quantizers
                 module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-               
+            elif type(module) == DIANAConv2d: 
+                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )    
+                print(module.scale)  
+
             elif (issubclass(type(module),DianaModule) and self is not module) : 
                 module.clip_scales() # recursion
+            
     def forward(self, x : torch.Tensor) : 
         return self.gmodule(x)
     def __call__(self, *args: Any, **kwds: Any) -> Any:
@@ -79,7 +83,7 @@ class DianaModule: # Base class for all diana models
         modulewisedescriptionspec = ( # change const later
             ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
             ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 8, 'signed': False} ,'meanstd' , 'DIANA')), # upper clip is updated during training
-            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here  #TODO In the future , test with per-channel quantization and ask compiler team if it's possible to that 
+            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here 
             ({'types': ( 'Linear' )}, ('per-array', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
         analogcoredescriptionspec =  ('per-array', {'bitwidth': 8, 'signed': True} , 'meanstd' )
@@ -109,7 +113,7 @@ class DianaModule: # Base class for all diana models
             x = x.unsqueeze(0)
         with torch.no_grad(): 
             self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}})
-        self._integrized = True
+        #self._integrized = True
     def integrize_layers(self)    : 
         
         converter = LayerIntegrizationConverter()
@@ -160,9 +164,9 @@ class DianaModule: # Base class for all diana models
         self.validation_dataset['size'] = len(dataset ) 
 
     @classmethod
-    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None , model_save_path : str = None , integrized = False , scale : torch.Tensor = None ): 
+    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None , model_save_path : str = None , integrized = False , scale : torch.Tensor = None, current_acc = 0  ): 
         metrics = {'train': {'loss': [], 'acc': []} , 'validate': {'loss': [], 'acc': []} }
-        max_val_acc = 0 
+        max_val_acc = current_acc 
         assert (model and optimizer) 
         for e in range(epochs):     
             for stage in ['train', 'validate']: 
@@ -202,8 +206,10 @@ class DianaModule: # Base class for all diana models
                 e_loss = running_loss / len(data_loader[stage].dataset)
                 e_acc = running_correct / len(data_loader[stage].dataset) 
                 print(f'Epoch {e+1} \t\t {stage} stage... Loss: {e_loss:.4f} Accuracy :{e_acc:.4f}')
-                if stage == 'train' and scheduler is not None: 
-                    scheduler.step()
+                if stage == 'validate' and scheduler is not None: 
+                    #if isinstance(scheduler , optim.lr_scheduler.ReduceLROnPlateau): 
+                    scheduler.step(e_acc)
+                       
                 metrics[stage]['loss'].append(e_loss)
                 metrics[stage]['acc'].append(e_acc)
                 if stage == 'validate' and e_acc > max_val_acc and model_save_path is not None: 
@@ -298,6 +304,8 @@ class DianaModule: # Base class for all diana models
         for _ , module in self.gmodule.named_modules(): 
             if isinstance(module , _QModule) and not isinstance(module ,_QActivation): 
                 module.stop_observing()
+                
+
     def initialize_quantization_activations(self ,count =400) : 
         for _ , module in self.gmodule.named_modules(): 
             if isinstance(module , _QActivation): 

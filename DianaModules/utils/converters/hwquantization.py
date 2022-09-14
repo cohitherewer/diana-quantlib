@@ -42,9 +42,9 @@ class HWMappingConverter(ComposedEditor) :
             ]
         
         editor_post = [   
-             EpsTunnelConstructSimplifier(),
-           AnalogNoiseEnabler() ,
-          EpsTunnelRemover()  ,
+          #   EpsTunnelConstructSimplifier(),
+         # AnalogNoiseEnabler() ,
+         # EpsTunnelRemover()  ,
             
         
         ]

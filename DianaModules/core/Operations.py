@@ -53,13 +53,11 @@ class DianaBaseOperation:
     def define_bitwidth_clipping(self): 
         self.bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) )#quantized clip lo and high
         self.bw_clip_hi =torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) )-1 
-        if len(self.clip_lo.shape ) > 3: 
-                for c in range(self.clip_lo.size(0)) : 
-                    if self.clip_lo[c][0][0][0] < 0 : 
-                        self.bw_clip_lo[c][0][0][0] =  -self.bw_clip_lo[c][0][0][0] 
       
-        elif self.clip_lo < 0: # TODO  for now just leave this so low clipping bound is -127  , implement this later specifically for simd model 
-            self.bw_clip_lo = -self.bw_clip_lo #+ 1
+        
+        mask = self.clip_lo < 0
+            #if self.clip_lo < 0: # TODO  for now just leave this so low clipping bound is -127  , implement this later specifically for simd model 
+        self.bw_clip_lo[mask] = -self.bw_clip_lo[mask] #+ 1
         
 class IdentityType(enum.Enum):  
     default = enum.auto() # 8 Bits 
@@ -212,6 +210,7 @@ class DIANAConv2d(QConv2d , DianaBaseOperation): #digital core
             self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
         self.define_bitwidth_clipping()
     def forward(self, x: torch.Tensor) : 
+        # round bias here 
         x = x.to(self.weight.device)
         return super().forward(x)
 
@@ -228,7 +227,8 @@ class AnalogConv2d(DIANAConv2d):
         assert self.max_channels >= 1 , f"Array size must be at least kernel_size * kernel_size: {kernel_size**2}"
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels, out_channels, kernel_size, stride, padding, dilation, bias=False)
 
-        self.gain = nn.Parameter(torch.rand(math.ceil(in_channels/self.max_channels))*4)# Analog domain gain from Vgs 
+        self.gain = nn.Parameter(torch.ones(math.ceil(in_channels/self.max_channels)))# Analog domain gain from Vgs 
+        self.gain_enabled = False 
         self.out_H = None # saving to not keep recomputing in forward pass 
         self.out_W = None # saving to not keep recomputing in forwar*d pass 
         
@@ -254,7 +254,10 @@ class AnalogConv2d(DIANAConv2d):
 
             group_passed = x[: , min_i:max_i , : , : ] 
             pass_weight = weight[: , min_i:max_i , : , : ]
-            conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding) 
+            if not self.gain_enabled: 
+                conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding) 
+            else: 
+                conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding) * self.gain[i] 
             if padded_out is None:            
                 padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
             padded_out[i] = conv_out
@@ -264,7 +267,10 @@ class AnalogConv2d(DIANAConv2d):
                 tile_size = counter # remaining 
         
         return padded_out
-
+    def enable_gain(self) : 
+        self.gain_enabled = True 
+    def disable_gain(self) : 
+        self.gain_enabled = False 
     def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
         if HW_Behaviour: 
             self.redefine_qhparams('ternary')
@@ -315,7 +321,7 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
             self.clip_lo = torch.Tensor([0])
             self.clip_hi = torch.Tensor([2**bitwidth]) -1 
         self.enabled = False  
-  
+        
     def enable(self): 
         self.enabled = True
     def disable(self): 

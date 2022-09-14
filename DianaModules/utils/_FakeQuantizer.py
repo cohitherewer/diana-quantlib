@@ -31,7 +31,7 @@ class _FakeAQuantiser(torch.autograd.Function):
                    scale:   torch.Tensor , truncate : bool = False ) : 
         x = x / (step * scale) # quantized 
         x = torch.clip(x, bw_clip_lo, bw_clip_hi ) # clipping to bw
-        x = torch.round(x)  if not truncate else  torch.floor(x * 2** 6 ) / 2**6 
+        x = torch.floor(x + 0.5)  if not truncate else  torch.floor(x * 2** 6 ) / 2**6 
         
         x = x * (step * scale)
         return x 

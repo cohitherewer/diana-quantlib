@@ -2,10 +2,11 @@
 #region Requantizer (requantizer at output of operations)
 
 import math
+from os import pread
 
 import torch 
 from torch import nn
-from DianaModules.core.Operations import AnalogAccumulator
+from DianaModules.core.Operations import AnalogAccumulator, AnalogOutIdentity
 
 from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
 
@@ -24,6 +25,7 @@ from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import
 from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
 _BN_KWARGS = {'num_features': 1}
 _EPS_KWARGS = {'eps': torch.Tensor([1.0])}
+checker = (lambda m : True if type(m) != AnalogOutIdentity else False, )
 
 roles = Roles([
 
@@ -42,7 +44,7 @@ roles = Roles([
     ])),
 
     ('activation', Candidates([
-        ('QIdentity',  NNModuleDescription(class_=nn.Identity,  kwargs={})),
+        ('QIdentity',  NNModuleDescription(class_=nn.Identity,  kwargs={} , checkers=checker)),
         ('QReLU',      NNModuleDescription(class_=nn.ReLU,      kwargs={})),
         ('QReLU6',     NNModuleDescription(class_=nn.ReLU6,     kwargs={})),
         ('QLeakyReLU', NNModuleDescription(class_=nn.LeakyReLU, kwargs={})),
@@ -71,6 +73,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         node_bn         = name_to_match_node['bn'] if 'bn' in name_to_match_node.keys() else None
         node_acc         = name_to_match_node['accumulator'] if 'accumulator' in name_to_match_node.keys() else None
         node_activation = name_to_match_node['activation']
+        
         node_eps_out    = name_to_match_node['eps_out']
         
         # get handles on matched `nn.Module`s
@@ -78,6 +81,9 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         module_eps_in     = name_to_match_module['eps_in']
         module_bn         = name_to_match_module['bn'] if 'bn' in name_to_match_module.keys() else None
         module_activation = name_to_match_module['activation']
+        if (isinstance(module_activation , AnalogOutIdentity)): 
+            print("ANALOG OUT FOUND ")
+            return g 
         module_eps_out    = name_to_match_module['eps_out']
 
         assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
@@ -106,16 +112,15 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         new_target = id_
         if module_bn is None: 
             
-          
             gamma_int = torch.floor( self.div_max_bitwidth *eps_in             / ( eps_out))# mul then div by self.D b
             
 
             if  torch.all(gamma_int.eq(torch.Tensor([0]))) :  # truncation 
                 raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
-            div = torch.exp2(torch.round(torch.log2(self.div_max_bitwidth  / gamma_int)))
+            div = torch.exp2(torch.round(torch.log2(eps_out             / ( eps_in))))
           #  print("without rounding to 2" , self.div_max_bitwidth  / gamma_int, " eps_in : " , eps_in  , " eps_out : ", eps_out) # TODO relus scales weren't pow2
-            #print("Maximum difference between without rounding and rounding: " ,  torch.max(torch.abs(torch.exp2(torch.round(torch.log2(self.div_max_bitwidth  / gamma_int))) - self.div_max_bitwidth  / gamma_int)) , f" for activation node: {node_activation}")
-           
+            print("Maximum difference between without rounding and rounding: " ,  torch.max(div - self.div_max_bitwidth  / gamma_int) , f" for activation node: {node_activation}")
+
             new_module = dq.DigitalRequantizer( div=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
         else: 
             # for onnx graph generation later 
@@ -124,7 +129,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             #print("sigma is" , sigma)
             #print("eps_out is " , eps_out)
             #print("sigma * eps_out ", sigma)
-            
+   
             gamma_int = torch.floor(self.bn_bitwidth * (eps_in * gamma)             / (sigma * eps_out)) #clip to power of 2
            
             if torch.all(gamma_int.eq(torch.Tensor([0])) ):  # truncation 

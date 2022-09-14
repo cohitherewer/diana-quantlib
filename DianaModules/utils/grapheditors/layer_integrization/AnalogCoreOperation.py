@@ -3,7 +3,7 @@
 from typing import List
 import torch 
 from torch import nn 
-from DianaModules.core.Operations import AnalogAccumulator, AnalogConv2d, AnalogGaussianNoise
+from DianaModules.core.Operations import AnalogAccumulator, AnalogConv2d, AnalogGaussianNoise, DIANAIdentity
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 from quantlib.editing.editing.editors.base.editor import Editor
@@ -37,7 +37,7 @@ analog_roles  = Roles([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
      ('identity', Candidates([
-        ('Requant', NNModuleDescription(class_=Requantisation, kwargs={'mul': torch.Tensor([1]) , 'add': torch.Tensor([1]), 'zero': torch.Tensor([1]) , 'n_levels': torch.Tensor([1])})),
+        ('Requant', NNModuleDescription(class_=DIANAIdentity, kwargs={'qrangespec':'ternary' , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd' })),
     ])),
      ('eps_identity_out', Candidates([
          ('',     None),  
