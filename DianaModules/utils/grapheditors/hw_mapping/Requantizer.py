@@ -1,9 +1,3 @@
-
-#region Requantizer (requantizer at output of operations)
-
-import math
-from os import pread
-
 import torch 
 from torch import nn
 from DianaModules.core.Operations import AnalogAccumulator, AnalogOutIdentity
@@ -81,9 +75,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         module_eps_in     = name_to_match_module['eps_in']
         module_bn         = name_to_match_module['bn'] if 'bn' in name_to_match_module.keys() else None
         module_activation = name_to_match_module['activation']
-        if (isinstance(module_activation , AnalogOutIdentity)): 
-            print("ANALOG OUT FOUND ")
-            return g 
+      
         module_eps_out    = name_to_match_module['eps_out']
 
         assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
@@ -104,7 +96,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         sigma = sigma.reshape(broadcast_shape)
         gamma = gamma.reshape(broadcast_shape)
         beta  = beta.reshape(broadcast_shape)
-
+        
         #gamma_int = torch.floor(self.D * (eps_in * gamma)             / (sigma * eps_out))
         #beta_int  = torch.floor(self.D * (-mi * gamma + beta * sigma) / (sigma * eps_out))
 
@@ -117,9 +109,23 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
 
             if  torch.all(gamma_int.eq(torch.Tensor([0]))) :  # truncation 
                 raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
+            #if '[9]' not in node_activation.target: 
             div = torch.exp2(torch.round(torch.log2(eps_out             / ( eps_in))))
+                
+            #else: 
+            #    pred = [p for p in node_activation.all_input_nodes] [0]
+            #    pred_mode = g.get_submodule(pred.target)
+            #    users = [ u for u in node_activation.users] [0]
+            #    user_mode = g.get_submodule(users.target)
+            #    print(f"Node {node_activation} has eps_tunnel pred with eps_out {pred_mode.eps_out} and user with eps_in {user_mode.eps_in}")
+                # without relu 1  is 0.8108
+                # without relu 2  is 0.7975 (original acc)
+                # without relu 3  is 0.7999
+                # without relu 4 is 0.7801
+                # without relu mod 9 biggest difference 8508 
+
           #  print("without rounding to 2" , self.div_max_bitwidth  / gamma_int, " eps_in : " , eps_in  , " eps_out : ", eps_out) # TODO relus scales weren't pow2
-            print("Maximum difference between without rounding and rounding: " ,  torch.max(div - self.div_max_bitwidth  / gamma_int) , f" for activation node: {node_activation}")
+            #print("Maximum difference between without rounding and rounding: " ,  torch.max(div - self.div_max_bitwidth  / gamma_int) , f" for activation node: {node_activation}")
 
             new_module = dq.DigitalRequantizer( div=div, zero=module_activation.zero, n_levels=module_activation.n_levels)
         else: 
@@ -137,21 +143,29 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             beta_int  = torch.floor(self.bn_bitwidth * (-mi * gamma + beta * sigma) / (sigma * eps_out))
             #print("Before factoring gamma_int is (mul/div): " , gamma_int/self.bn_bitwidth)
             #print("Before factoring beta_int is (mul/div): " , beta_int/self.bn_bitwidth)
-            gamma_int = (eps_in * gamma)             / (sigma * eps_out) # clip to the power of 2 . eps_in is the ADC scale 
+            gamma_int = (eps_in * gamma)             / (sigma) # clip to the power of 2 . eps_in is the ADC scale 
 
-            beta_int  =( -mi * gamma + beta * sigma) / (sigma * eps_out)
-            factored_power_of_2 = torch.Tensor([1])
+            beta_int  =( -mi * gamma + beta * sigma) / (sigma )
+            #print("max gamma_int" ,torch.max(torch.abs(gamma_int )))
+            #print("max beta int " ,torch.max(torch.abs(beta_int )))
+            #print("Eps out: " ,torch.log2(eps_out))
+            #print("eps in ; " , torch.log2(eps_in))
+            factored_power_of_2 = torch.Tensor([15])
+
             while True  : 
                 max_multiplier = torch.max(torch.maximum(torch.abs(gamma_int ), torch.abs(beta_int )))
-                factored_power_of_2 += 1
-                if  torch.exp2(factored_power_of_2) * max_multiplier > self.bn_bitwidth/2 :
+                
+                if  torch.exp2(factored_power_of_2) * max_multiplier >= self.bn_bitwidth /2:
                      
                     factored_power_of_2 -=1
+                else: 
+                   # print( "Maximum value: " , max_multiplier * torch.exp2(factored_power_of_2))
+                   # print("factored power of 2" , factored_power_of_2)
                     break 
             
-            beta_int =torch.floor( torch.exp2(factored_power_of_2) *  beta_int )
-            gamma_int = torch.floor(torch.exp2(factored_power_of_2) * gamma_int ) 
-            div = torch.exp2(factored_power_of_2)
+            beta_int =torch.clamp(torch.round( torch.exp2(factored_power_of_2) *  beta_int ) , min = -self.bn_bitwidth /2, max = self.bn_bitwidth/2 - 1)
+            gamma_int = torch.clamp(torch.round(torch.exp2(factored_power_of_2) * gamma_int ) , min = -self.bn_bitwidth /2, max = self.bn_bitwidth/2 - 1)
+            div = torch.clamp(torch.exp2(factored_power_of_2) * eps_out , min=torch.Tensor([1]))
             #print("after factoring gamma_int is (mul/div): " , gamma_int/div)
             #print("after factoring beta_int is (mul/div): " , beta_int/div)
 

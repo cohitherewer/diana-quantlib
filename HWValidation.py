@@ -24,6 +24,7 @@ class ParamLayer:
     q_s : int =1#quantization scale  2**scale
     def print_params(self): 
         print(f'bn_w: {self.bn_w} \nbn_ws: {self.bn_ws} \nbn_b: {self.bn_b} \nbn_bs: {self.bn_bs} \nr_s: {self.r_s} \nq_s: {self.q_s} ')
+        
 import unittest
 class SIMDValidation(unittest.TestCase): 
     def setUp(self):
@@ -89,8 +90,6 @@ class SIMDValidation(unittest.TestCase):
         
         self.assertTrue(np.allclose(d_out.detach().numpy()[0], hw_out[0], rtol=1e-05, atol=1e-08))
         pass 
-
-
 
 
 if __name__ == "__main__": 

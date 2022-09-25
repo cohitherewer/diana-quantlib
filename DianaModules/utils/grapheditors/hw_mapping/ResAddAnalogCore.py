@@ -128,18 +128,29 @@ class ResidualAddsAnalogCoreApplier(Applier):
         # Add beta    = module_bn.bias
         mul = eps_in *gamma /sigma  * absorbed_factor
         add =(-mi * gamma + beta * sigma) / (sigma) * absorbed_factor
-   
-        factored_power_of_2 = torch.Tensor([1])
+        #print( "Max mul: " , torch.max(torch.abs(mul)))
+        #print( "Max add: " , torch.max(torch.abs(add)))
+        factored_power_of_2 = torch.Tensor([15])
         while True  : 
             max_multiplier = torch.max(torch.maximum(torch.abs(mul ), torch.abs(add )))
-            factored_power_of_2 += 1
+            
             if  torch.exp2(factored_power_of_2) * max_multiplier > self.bn_bitwidth/2 :
-
-                factored_power_of_2 -=1
-                break 
+                factored_power_of_2 -= 1
+                
+                
+               
+            else : 
+                #print("Maximum Value: " ,  torch.exp2(factored_power_of_2) * max_multiplier)
+                #print("Factored power of 2: "  ,factored_power_of_2) 
+              #  print(max_multiplier)
+                break
+                 
+            
     
-        add =torch.floor( torch.exp2(factored_power_of_2) *  add )
-        mul = torch.floor(torch.exp2(factored_power_of_2) * mul ) 
+        add =torch.clamp(torch.round( torch.exp2(factored_power_of_2) *  add ),  min = -self.bn_bitwidth /2, max = self.bn_bitwidth/2 - 1)
+        mul = torch.clamp(torch.round(torch.exp2(factored_power_of_2) * mul ) ,  min = -self.bn_bitwidth /2, max = self.bn_bitwidth/2 - 1)
+        #print(add)
+
         # add new Mul add module and delete batch norm 
         mul_add_target = id_ 
         muladd_module = MulAdd(mul , add ) 

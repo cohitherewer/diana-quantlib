@@ -20,7 +20,7 @@ from quantlib.editing.graphs.nn.epstunnel import EpsTunnel
 train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
 #train_scale = torch.Tensor([0.0354]) # meanstd
-train_scale = torch.Tensor([0.03125]) # meanstd
+train_scale = torch.Tensor([0.03125]) # pow2
 #train_scale = torch.Tensor([0.0217]) # minmax
 test_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
 
@@ -88,7 +88,7 @@ data_loader = {'train': ut.DataLoader(train_dataset, batch_size=128, shuffle=Tru
 
 ## Fake quantize to mixed model 
 
-_Mixed_model = DianaModule(DianaModule.from_trained_model(model , map_to_analog=True ) ) # 8 bits only (digital core only )
+_Mixed_model = DianaModule(DianaModule.from_trainedfp_model(model , map_to_analog=True ) ) # 8 bits only (digital core only )
 print("finished conversion") 
 _Mixed_model.attach_train_dataset(train_dataset , train_scale) 
 _Mixed_model.attach_validation_dataset(test_dataset , train_scale) 
@@ -127,13 +127,13 @@ out_path_FQ_A_test= output_weights_path + "/"+'ResNet_ActQuantizedTest.pth'
 #    if isinstance(module,DIANAReLU) : 
 #        module.freeze()
 benchmark= True
-print("FQ_model Linear Layers Quantized Before Training  ", _Mixed_model.evaluate_model()[1])
+#print("FQ_model Linear Layers Quantized Before Training  ", _Mixed_model.evaluate_model()[1])
 print("Starting FQ training Linear Layer")
 optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.0001 ,momentum = 0.1 ,weight_decay=5e-7)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.1)# stepping on val accuracy 
 current_acc= torch.load(out_path_FQ_nogain_perchannel)['acc']
 #params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=120, model_save_path=out_path_FQ_nogain_perchannel , scheduler = scheduler, current_acc= current_acc ) # training with scale of layer before relu clipped to 2 
-print("FQ_model Linear Layers Quantized After Training", _Mixed_model.evaluate_model()[1])
+#print("FQ_model Linear Layers Quantized After Training", _Mixed_model.evaluate_model()[1])
 
 print("initializing activations") 
 _Mixed_model.initialize_quantization_activations(1)
@@ -145,15 +145,17 @@ print("activations initialized")
 
 #_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(out_path_FQ_A )['state_dict'])  )
 _Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(out_path_FQ_A_test )['state_dict'])  )
+#_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule,device_ids=[0 , 1]).cuda()
 _Mixed_model.gmodule.to(DianaModule.device)
 _Mixed_model.clip_scales_pow2()
 #print("FQ_model Activations Quantized Before Training", _Mixed_model.evaluate_model()[1])
 
 #train 
-#print("Training activations")
-optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.0001, momentum =0.1 , weight_decay=5e-7)
+print("Training activations")
+optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01,  weight_decay=5e-7)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.1)# stepping on val accuracy 
 current_acc= torch.load(out_path_FQ_A_test)['acc']
+
 #params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=120, model_save_path=out_path_FQ_A_test , scheduler = scheduler , current_acc=current_acc) 
 # train end
 
@@ -170,21 +172,23 @@ print("FQ_model Activations Quantized After Training", _Mixed_model.evaluate_mod
 out_path_HWmapped= output_weights_path + "/"+'ResNet_HWMapped.pth'# 0.8791
 out_path_HWmapped_noise= output_weights_path + "/"+'ResNet_HWMappedNoise.pth'
 _Mixed_model.gmodule = _Mixed_model.gmodule.to('cpu')
+
 _Mixed_model.map_to_hw()#[ILSVRC12.ResNet.RNHeadRewriter()]) 
 
 
-#_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(out_path_HWmapped_noise )['state_dict']))
+#_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(out_path_HWmapped )['state_dict']))
 #_Mixed_model.gmodule.eval() 
-
-#_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule,device_ids=[0 , 1]).cuda()
+_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule,device_ids=[0 , 1]).cuda()
 _Mixed_model.gmodule.to(DianaModule.device)
 print("evaluating HW mapped quantized mixed model acc") 
 print(" HW mapped quantized before training mixed model acc: ", _Mixed_model.evaluate_model()[1])
 #train hw-mapped 
 print("Training HW mapped quantized model ")
-#optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.01, weight_decay = 1e-5)
-#scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.1 , patience=4)# stepping on val accuracy 
-#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=120, model_save_path=out_path_HWmapped_noise , integrized = True , scale =train_scale.to(DianaModule.device), scheduler=scheduler ) 
+optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters(), lr = 0.001,  momentum = 0.1 , weight_decay = 1e-7)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.1 )# stepping on val accuracy
+current_acc = 0.8441
+
+params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=120, model_save_path=out_path_HWmapped , scheduler=scheduler , current_acc=current_acc ) 
 #train end 
 #print(" HW mapped quantized after training mixed model acc: ", _Mixed_model.evaluate_model()[1])
 _Mixed_model.gmodule.to('cpu')

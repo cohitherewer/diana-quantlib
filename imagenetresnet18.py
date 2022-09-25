@@ -20,7 +20,7 @@ device = torch.device('cuda:1')
 fp_model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
 data_loader = {'train': DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=4) , 'validate' : DataLoader(dataset=validation_dataset, batch_size=batch_size, shuffle=True  ,pin_memory=True, num_workers=4)}
 # Fake - Quantization 
-resnet18_diana = DianaModule(DianaModule.from_trained_model(fp_model, map_to_analog=False) ) 
+resnet18_diana = DianaModule(DianaModule.from_trainedfp_model(fp_model, map_to_analog=False) ) 
 resnet18_diana.attach_train_dataset(train_dataset)
 resnet18_diana.attach_validation_dataset(validation_dataset)
 resnet18_diana.gmodule.to(device) 

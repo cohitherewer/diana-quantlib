@@ -2,6 +2,8 @@
 r""" Maps scales to hw-specific scales. Batchnorm layers are converted to 8 bits mul and add and activations are requantized. Also, enables noise nodes of the analog core and scaled are clipped to power of 2"""
 from typing import List, Tuple
 from DianaModules.utils.grapheditors.hw_mapping.AnalogNoiseEnabler import AnalogNoiseEnabler
+from DianaModules.utils.grapheditors.hw_mapping.BNFolding import BNFolder
+from DianaModules.utils.grapheditors.hw_mapping.LinLayerQuant import LinearLayerQuantizer
 
 
 from DianaModules.utils.grapheditors.hw_mapping.Requantizer import DianaRequantizer
@@ -29,22 +31,23 @@ from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 class HWMappingConverter(ComposedEditor) : 
     def __init__(self, custom_editor : List[Editor] = []) : 
         editors = [
-            
+            BNFolder() , 
+            LinearLayerQuantizer() ,
             QuantLibRetracer(),
           
             F2TAnnotator(),
+             
             EpsTunnelInserter(),
                
             
             ResidualAddsAnalogCoreRewriter() ,  
-            DianaRequantizer()  , 
+           DianaRequantizer()  , 
             
             ]
         
         editor_post = [   
-          #   EpsTunnelConstructSimplifier(),
-         # AnalogNoiseEnabler() ,
-         # EpsTunnelRemover()  ,
+            EpsTunnelConstructSimplifier(),
+           AnalogNoiseEnabler() ,
             
         
         ]
@@ -57,9 +60,12 @@ class HWMappingConverter(ComposedEditor) :
               *args,
               **kwargs) -> fx.GraphModule:
 
-        g = self._children_editors[0](g)                    # `QuantLibRetracer`
-        g = self._children_editors[1](g, inputdescription)  # `F2TAnnotator`
-        for editor in self._children_editors[2:]:
+        g = self._children_editors[0](g)                    # `BNFolder`
+        g = self._children_editors[1](g, inputdescription,input = kwargs['input'])  # `LinearLayerQuantizer`
+        g = self._children_editors[2](g)                    # `QuantLibRetracer`
+        g = self._children_editors[3](g, inputdescription)  # `F2TAnnotator`
+        
+        for editor in self._children_editors[4:]:
             g = editor(g)
 
         return g

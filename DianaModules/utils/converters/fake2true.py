@@ -2,6 +2,7 @@ r"""Neural network layers are mapped to standard pytorch models in preparation f
 from DianaModules.utils.grapheditors.hw_mapping.Requantizer import DianaRequantizer
 from DianaModules.utils.grapheditors.layer_integrization.AnalogCoreOperation import AnalogConvIntegrizer
 from DianaModules.utils.grapheditors.layer_integrization.AnalogNoiseDisabler import AnalogNoiseDisabler
+from DianaModules.utils.grapheditors.layer_integrization.AnalogOutRequant import AnalogOutRequantizer
 from DianaModules.utils.grapheditors.layer_integrization.LinearOpQuant import DianaLinearOpIntegrizer
 
 
@@ -21,7 +22,7 @@ class LayerIntegrizationConverter(ComposedEditor) :
             
         AnalogConvIntegrizer(),
         DianaLinearOpIntegrizer() , #problem is hereee
-        
+        AnalogOutRequantizer() ,
             
        EpsTunnelConstructSimplifier() ,
        EpsTunnelRemover()

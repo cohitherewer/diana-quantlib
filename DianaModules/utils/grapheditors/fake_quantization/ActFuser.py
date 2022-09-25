@@ -41,13 +41,16 @@ class DianaQuantizerFuserApplier(Applier) :
     def __init__(self):
         super().__init__()
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
+        node = ap.node
         pre_node = [p for p in ap.node.all_input_nodes][0]
         pre_module = g.get_submodule(pre_node.target) 
         cur_module = g.get_submodule(ap.node.target) 
         lower_bitwidth = 0 if (min(pre_module.n_levels, cur_module.n_levels) == pre_module.n_levels ) else 1
         
-        
-        if lower_bitwidth == 0 : 
+        pre_node_users = [p for p in pre_node.users]  # upstream
+        harmonise_add_nodes= [p for p in pre_node.users if 'AddTreeHarmoniser' in p.target] 
+  
+        if lower_bitwidth == 0 or len(pre_node_users)-1 == len(harmonise_add_nodes): 
             #if it's 0 then remove cur node 
             cur_node_users = [u for u in ap.node.users ]
 
@@ -61,19 +64,7 @@ class DianaQuantizerFuserApplier(Applier) :
             g.delete_submodule(ap.node.target)
             g.graph.erase_node(ap.node)
             # Edit clipping of pre_node        
-        else: 
-            pre_node_users = [p for p in pre_node.users]  # upstream
-        
-            if len(pre_node_users)  == 1:  # make sure pre node only has 1 user
-                for user in pre_node_users:  #without ap.node
-                    user.replace_input_with(pre_node, ap.node)
-                if(pre_module.zero != cur_module.zero)  : 
-                    cur_module.zero = max(pre_module.zero , cur_module.zero)  
-                    cur_module.n_levels =( min(pre_module.zero+pre_module.n_levels,cur_module.zero+cur_module.n_levels) - cur_module.zero)/cur_module.step# (min clip_hi - zero )/step
-            
-                g.delete_submodule(pre_node.target)
-                g.graph.erase_node(pre_node)
-        
+
         return g 
 #this class is used for fusing activations in true to fake 
 class DianaQuantizerFuser(Rewriter) :

@@ -1,4 +1,5 @@
-import numpy
+from typing import Union
+import numpy as np 
 
 # bn_w  quantized batchnorm weight
 # bn_ws batchnorm weight scale
@@ -24,10 +25,10 @@ class SIMDModel:
     - NOP
     '''
     @classmethod
-    def _bn(cls, layer, in_fmap): # batch norm 
-        out_fmap = numpy.zeros(in_fmap.shape)
+    def _bn(cls, layer, in_fmap , row =0 ): # batch norm 
+        out_fmap = np.zeros(in_fmap.shape)
         for c in range(in_fmap.shape[1]):
-            out_fmap[0][c] = (layer.bn_w[c][0]*(2**layer.bn_ws))*in_fmap[0][c] + (layer.bn_b[c]*2**layer.bn_bs)
+            out_fmap[row][c] = (layer.bn_w[c][row]*(2**layer.bn_ws))*in_fmap[row][c] + (layer.bn_b[c]*2**layer.bn_bs)
         return out_fmap
     @classmethod
     def _rs(cls, layer, in_fmap0, in_fmap1): #residual add 
@@ -43,87 +44,55 @@ class SIMDModel:
         min_val = -2**(bw-1)+1
         clip_min_mask = (in_fmap<min_val).astype(int)
         clip_max_mask = (in_fmap>max_val).astype(int)
-        clip_min_mask_n = numpy.logical_xor(clip_min_mask, 1).astype(int)
-        clip_max_mask_n = numpy.logical_xor(clip_max_mask, 1).astype(int)
-        min_filler = numpy.ones(in_fmap.shape)*clip_min_mask*min_val
-        max_filler = numpy.ones(in_fmap.shape)*clip_max_mask*max_val
+        clip_min_mask_n = np.logical_xor(clip_min_mask, 1).astype(int)
+        clip_max_mask_n = np.logical_xor(clip_max_mask, 1).astype(int)
+        min_filler = np.ones(in_fmap.shape)*clip_min_mask*min_val
+        max_filler = np.ones(in_fmap.shape)*clip_max_mask*max_val
         out_fmap = (in_fmap*clip_min_mask_n*clip_max_mask_n)+min_filler+max_filler
         return out_fmap
     @classmethod
-    def _quant(cls, layer, in_fmap, ds=False): # quantize 
-        out_fmap = numpy.floor(in_fmap/2**layer.q_s)
-        out_fmap = cls._clip(out_fmap,7)
+    def _quant(cls, layer, in_fmap, ds=False, bitwidth= 7 ): # quantize 
+        out_fmap = np.floor(in_fmap/2**layer.q_s)
+        out_fmap = SIMDModel._clip(out_fmap,bitwidth)
         return out_fmap
     @classmethod
     def fp(cls, layer, in_fmap0, in_fmap1=None, ds=False): # forward pass 
-        x = cls._bn(layer, in_fmap0)
-        if type(in_fmap1) == numpy.ndarray:
-            x = cls._rs(layer, x, in_fmap1)
+        x = SIMDModel._bn(layer, in_fmap0)
+        if type(in_fmap1) == np.ndarray:
+            x = SIMDModel._rs(layer, x, in_fmap1)
         if ds==False:
-            x = cls._relu(x)
-        x = cls._quant(layer, x)
+            x = SIMDModel._relu(x)
+        x = SIMDModel._quant(layer, x)
         return x
+    @classmethod
+    def simd_op(cls, layer , in_fmap0 : np.ndarray, in_fmap1:Union[np.ndarray, None] =None): # forward pass 
+
+        x = SIMDModel._bn_f(layer, in_fmap0)
+        if in_fmap1 is not None:
+            x = SIMDModel._rs(layer, x, in_fmap1)
+        if layer.relu==True:
+            x = SIMDModel._relu(x)
+        x = SIMDModel._quant(layer, x,bitwidth=layer.bitwidth_clip)
+        return x  
+    @classmethod 
+    def _bn_f(cls, layer, in_fmap ): # batch norm 
+        out_fmap = np.zeros(in_fmap.shape)
+        for batch in range(in_fmap.shape[0]):  
+            for channel in range(in_fmap.shape[1]): 
+                for row in range(in_fmap.shape[2]): 
+                    for c in range(in_fmap.shape[3]):
+                        out_fmap[batch][channel][row][c] = (layer.bn_w[0][channel][0][0].item()*(2**layer.bn_ws))*in_fmap[batch][channel][row][c].item() + (layer.bn_b[0][channel][0][0].item()*2**layer.bn_bs)
+        return out_fmap
     @classmethod
     def fp_dbg(cls, layer, in_fmap0, in_fmap1=None, ds=False):
         out = []
-        out.append(cls._bn(layer, in_fmap0))
+        out.append(SIMDModel._bn(layer, in_fmap0))
         i=0
-        if type(in_fmap1) == numpy.ndarray:
-            out.append(cls._rs(layer, out[i], in_fmap1))
+        if type(in_fmap1) == np.ndarray:
+            out.append(SIMDModel._rs(layer, out[i], in_fmap1))
             i+=1
         if ds==False:
-            out.append(cls._relu(out[i]))
+            out.append(SIMDModel._relu(out[i]))
             i+=1
-        out.append(cls._quant(layer, out[i]))
+        out.append(SIMDModel._quant(layer, out[i]))
         return out
-
-class DCore :
-    @classmethod 
-    def create_conv(i_layer, layer_node, dory_node, network_dir, input=None, weight=None, batchnorm_params=None):
-        x = input if input is not None else create_input(layer_node)
-        x_save = x.flatten()
-        if input is None:
-            np.savetxt(os.path.join(network_dir, 'input.txt'), x_save, delimiter=',', fmt='%d')
-
-        w = weight if weight is not None else create_weight(layer_node)
-        layer_node.constant_names.append('weights')
-        layer_node.weights = {
-            'value': w.numpy(),
-            'layout': 'CoutCinK'
-        }
-        b = create_bias(layer_node)
-        layer_node.constant_names.append('bias')
-        layer_node.bias = {
-            'value': b.numpy(),
-            'layout': ''
-        }
-
-        y = F.conv2d(input=x, weight=w, bias=b, stride=layer_node.strides, padding=layer_node.pads[0], groups=layer_node.group)
-        y_type = torch.int32
-        y = y.type(y_type)
-        y_signed = layer_node.output_activation_type == 'int'
-
-        dory_node.constant_names.append('outmul')
-        dory_node.outmul = {
-            'value': 1,
-            'layout': ''
-        }
-
-        dory_node.constant_names.append('outshift')
-        dory_node.outshift = {
-            'value': calculate_shift(y, dory_node.output_activation_bits, y_signed),
-            'layout': ''
-        }
-        y = y >> dory_node.outshift['value']
-        y = clip(y, dory_node.output_activation_bits, y_signed)
-
-        y_save = copy.deepcopy(y.flatten())
-        y_save = y_save.reshape(int(y_save.shape[0]/4), 4)
-        y_save1 = copy.deepcopy(y_save)
-        y_save[:,0] = y_save1[:,3] 
-        y_save[:,1] = y_save1[:,2] 
-        y_save[:,2] = y_save1[:,1] 
-        y_save[:,3] = y_save1[:,0] 
-        y_save = y_save.flatten().numpy()
-        np.savetxt(os.path.join(network_dir, f'out_layer{i_layer}.txt'), y_save, delimiter=',', fmt='%d')
-        return y

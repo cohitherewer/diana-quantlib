@@ -45,7 +45,7 @@ class model (nn.Module)  :
     def forward(self , x: torch.Tensor): 
         return self.sq(x) 
 m = model()
-model_converted = DianaModule(DianaModule.from_trained_model(m , map_to_analog=True) )
+model_converted = DianaModule(DianaModule.from_trainedfp_model(m , map_to_analog=True) )
 print("FAKE QUANTIAATIONN")
 print("FAKE QUANTIAATIONN")
 print(model_converted.gmodule)

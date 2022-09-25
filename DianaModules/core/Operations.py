@@ -84,12 +84,7 @@ class DIANALinear(QLinear , DianaBaseOperation):
         self.bw_clip_lo = self.bw_clip_lo.to(self.scale.device) 
         return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
     
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
-        else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})                     
-        self.define_bitwidth_clipping()
+    
 
     def forward(self, x: torch.Tensor) : 
         x = x.to(self.weight.device)
@@ -97,14 +92,22 @@ class DIANALinear(QLinear , DianaBaseOperation):
 # Activations
 class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity for harmoniser adds ( Quant operation )
     def __init__(self,
-                 qrangespec:               QRangeSpecType,
-                 qgranularityspec:         QGranularitySpecType,
-                 qhparamsinitstrategyspec: QHParamsInitStrategySpecType ,
-                 QuantizerType : IdentityType = IdentityType.default ):
+                
+                 qrangespec:              Union[QRangeSpecType , IdentityType],
+                 qgranularityspec:         QGranularitySpecType ,
+                 qhparamsinitstrategyspec: QHParamsInitStrategySpecType  ,
+                 ):
+        if type(qrangespec) == IdentityType:  
+            if qrangespec == IdentityType.AIMC_IN: 
+                qrangespec = {'bitwidth' : 7, 'signed': True} 
+            elif qrangespec == IdentityType.AIMC_OUT: 
+                qrangespec = {'bitwidth' : 6, 'signed': True} 
+            else:
+                qrangespec = {'bitwidth' : 8, 'signed': True} 
+            
         super().__init__(qrangespec,
                  qgranularityspec,
                  qhparamsinitstrategyspec) 
-        self._type =  QuantizerType
     def _register_qop(self): #used for autograd functions with non-standard backward gradients 
         self._qop = _FakeDQuantiser.apply 
     def stop_observing(self):
@@ -115,29 +118,7 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         self.bw_clip_lo= self.bw_clip_lo.to(x.device) 
     
         return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        if HW_Behaviour: 
-            if self._type == IdentityType.default: 
-                self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
-            elif self._type == IdentityType.AIMC_IN: 
-                self.redefine_qhparams({'bitwidth' : 7, 'signed': True}) 
-            elif self._type == IdentityType.AIMC_OUT: 
-                self.redefine_qhparams({'bitwidth' : 6, 'signed': True}) 
-            else:
-                self.redefine_qhparams({'bitwidth' : 8, 'signed': True}) 
-        else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
-        self.define_bitwidth_clipping()
-    def get_bitwidth(self):
-        if self._type == IdentityType.default: 
-            return 8 
-        elif self._type == IdentityType.AIMC_IN: 
-            return 7 
-        elif self._type == IdentityType.AIMC_OUT: 
-            return 6 
-        else:
-            return 8 
-
+ 
 class DIANAReLU( PACTReLU  , DianaBaseOperation): 
     def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, inplace: bool = False ):
     
@@ -145,15 +126,17 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     def call_qop(self, x: torch.Tensor) -> torch.Tensor:
      
         return super().call_qop(x) 
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 7, 'signed': False})
+    def freeze(self):
+        self.clip_lo.requires_grad = False
+        self.clip_hi.requires_grad = False
+        self._clipping_bounds_are_frozen |= True
 
-            #  clip here and freeze 
-          #  self.freeze() 
-        #else : 
-        #    self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed}) 
-        pass
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = super().forward(x)
+        if self._is_quantised & True == True: 
+            self.scale =torch.exp2(torch.round(torch.log2(self.scale)))
+        return out 
+    
     
 
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
@@ -203,12 +186,6 @@ class DIANAConv2d(QConv2d , DianaBaseOperation): #digital core
 
         return self._qop(x, self.bw_clip_lo, self.bw_clip_hi, self.step, self.scale) 
    
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        if HW_Behaviour: 
-            self.redefine_qhparams({'bitwidth' : 8 , 'signed': True})   
-        else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
-        self.define_bitwidth_clipping()
     def forward(self, x: torch.Tensor) : 
         # round bias here 
         x = x.to(self.weight.device)
@@ -229,9 +206,7 @@ class AnalogConv2d(DIANAConv2d):
 
         self.gain = nn.Parameter(torch.ones(math.ceil(in_channels/self.max_channels)))# Analog domain gain from Vgs 
         self.gain_enabled = False 
-        self.out_H = None # saving to not keep recomputing in forward pass 
-        self.out_W = None # saving to not keep recomputing in forwar*d pass 
-        
+
 
     def forward(self, x : torch.Tensor) : # returns a five dimensionsal tensor 
         x.to(self.weight.device) 
@@ -271,19 +246,19 @@ class AnalogConv2d(DIANAConv2d):
         self.gain_enabled = True 
     def disable_gain(self) : 
         self.gain_enabled = False 
-    def map_scales(self, new_bitwidth=8, signed=True, HW_Behaviour=False):
-        if HW_Behaviour: 
-            self.redefine_qhparams('ternary')
+    def stop_observing(self):
+        
+        super(DIANAConv2d, self).stop_observing()
+        if self.n_levels <= 3: 
             self.bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
             self.bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device)  
-            return
-        else : 
-            self.redefine_qhparams({'bitwidth' : new_bitwidth, 'signed': signed})   
+        else: 
             self.define_bitwidth_clipping() 
+        
  
 class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass randomly sample a group (except the last one ) and observe it
-    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType):
-        super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, IdentityType.AIMC_OUT)
+    def __init__(self ,qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType,):
+        super().__init__ ( qrangespec=IdentityType.AIMC_OUT, qgranularityspec=qgranularityspec, qhparamsinitstrategyspec=qhparamsinitstrategyspec)
 
     #def forward(self, x : torch.Tensor):
     #    if self._is_observing:
@@ -331,8 +306,8 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
         if self.enabled: 
             self.clip_lo  = self.clip_lo.to(x.device)
             self.clip_hi  = self.clip_hi.to(x.device)
-            x = x + self.SNR_i*x*(torch.randn_like(x)  *self.sigma) 
+            x = torch.round(x + self.SNR_i*x*(torch.randn_like(x)  *self.sigma) )
             return torch.clamp(x, self.clip_lo , self.clip_hi ) 
         return x 
-    def backward(self , grad_in : torch.Tensor) : 
-        return grad_in 
+   # def backward(self , grad_in : torch.Tensor) : 
+   #     return grad_in 

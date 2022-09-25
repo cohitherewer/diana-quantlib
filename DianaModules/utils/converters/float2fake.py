@@ -34,7 +34,8 @@ class F2FConverter(ComposedEditor):
                  addtreeqdescriptionspec:     QDescriptionSpecType,
                  analogcoredescriptionspec : Tuple[str , ...]  ,
                  addtreeforceoutputeps:       bool = False ,
-                 map_to_analog : bool = True 
+                 map_to_analog : bool = True  ,  
+                 modules_descriptors = None
              ):
 
         super(F2FConverter, self).__init__([
@@ -45,7 +46,9 @@ class F2FConverter(ComposedEditor):
                 addtreeqdescriptionspec,
                 analogcoredescriptionspec, 
                 addtreeforceoutputeps, 
-                map_to_analog=map_to_analog
+                map_to_analog=map_to_analog ,
+                modules_descriptors= modules_descriptors
+
                 
             )
          
@@ -60,14 +63,14 @@ class F2FQuantiser(ComposedEditor):
                  addtreeqdescriptionspec:     QDescriptionSpecType,
                 analogcoredescriptionspec : Tuple [str , ...], 
                  addtreeforceoutputeps:       bool,
-                 map_to_analog : bool = True 
+                 map_to_analog : bool = True , modules_descriptors = None
                  ):
     
         editors = [QuantLibRetracer(),
             
             ModuleWiseConverter(modulewisedescriptionspec)]  
         if map_to_analog : 
-            editors.append(AnalogConvMapper(analogcoredescriptionspec))
+            editors.append(AnalogConvMapper(analogcoredescriptionspec, modules_descriptors))
         editors += [DianaF2FInterposer()  ,  
         
             

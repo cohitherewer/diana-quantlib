@@ -12,29 +12,32 @@ from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.module
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 #  Analog conv should be placed before interposer
 class AnalogConvFinder(Finder) : 
-    def __init__(self) -> None:
+    def __init__(self, modules_descriptors = None) -> None:
         super().__init__()
+        self._descriptors = modules_descriptors
     def find(self, g: fx.GraphModule) -> List[DianaAps]:
-        aps : List[DianaAps]
-        aps = [] 
-        #name_to_module #get names and modules with activations 
-        # get modules first 
-        names = []
-        for name ,_ in g.named_modules(): 
-            if(isinstance(g.get_submodule(name) , DIANAConv2d) and g.get_submodule(name).is_analog): 
-                names.append(name)
-            
-        for node in g.graph.nodes: 
-            if node.target in names : 
-                aps.append(DianaAps('conv' ,node)) 
+        aps : List[DianaAps] =[]
+        
+        for node  in g.graph.nodes: 
+            try: 
+                if isinstance(g.get_submodule(node.target), DIANAConv2d): 
+                    if self._descriptors is None and g.get_submodule(node.target).is_analog: 
+                        aps.append(DianaAps('aconv' ,node)) 
+                    else: 
+                        # TODO Add feature for depthwise seperable convs 
+                        assert node.target in self._descriptors.keys() 
+                        if self._descriptors[node.target]['core_choice'].upper() == 'ANALOG': 
+                            aps.append(DianaAps('aconv' ,node)) 
+            except: pass 
         
         return aps 
     def check_aps_commutativity(self, aps: List[DianaAps]) -> bool:
         return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
 
 class AnalogConvApplier(Applier) : 
-    def __init__(self, description : Tuple[str , ...]): 
+    def __init__(self, description : Tuple[str , ...], modules_descriptors = None): 
         self.spec = description
+        self._descriptors = modules_descriptors
         super().__init__()
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
         #  add  gaussian noise  ,accumulator &
@@ -57,10 +60,14 @@ class AnalogConvApplier(Applier) :
         for u in users: 
             u.replace_input_with(node ,accumulator_node )
         # replace DIANAConv2d with AnalogConv2D
-     
-        qgranularity = self.spec[0]
         qrange = self.spec[1]
-        qhparaminitstrat = self.spec[2]
+        if self._descriptors is not None and node.target in self._descriptors.keys(): 
+            # TODO Add feature for depthwise seperable convs 4
+            qgranularity = self._descriptors[node.target]['qgranularityspec']
+            qhparaminitstrat = self._descriptors[node.target]['qhinitparam']  
+        else: 
+            qgranularity = self.spec[0]
+            qhparaminitstrat = self.spec[2]
         analog_module = AnalogConv2d(qrangespec=qrange , qgranularityspec=qgranularity , qhparamsinitstrategyspec=qhparaminitstrat , in_channels=conv_module.in_channels , out_channels=conv_module.out_channels , kernel_size=conv_module.kernel_size , stride = conv_module.stride , padding=conv_module.padding , dilation=conv_module.dilation) #initialize the analog conv2d operation 
         #analog_module.weight.data = conv_module.weight.data.clone().detach() 
         #replace it 
@@ -72,7 +79,8 @@ class AnalogConvApplier(Applier) :
         return g
 
 class AnalogConvMapper(Rewriter) : 
-    def __init__(self ,analogconvdescriptionspec):
-        finder = AnalogConvFinder() 
-        applier = AnalogConvApplier(description=analogconvdescriptionspec) 
+    def __init__(self ,analogconvdescriptionspec ,modules_descriptors = None):
+
+        finder = AnalogConvFinder(modules_descriptors) 
+        applier = AnalogConvApplier(description=analogconvdescriptionspec , modules_descriptors=modules_descriptors) 
         super().__init__("AnalogConvMapper", quantlib_symbolic_trace, finder, applier)
