@@ -35,9 +35,9 @@ import importlib
 
 
 class DianaModule: # Base class for all diana models  
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
-        graph_module.to(DianaModule.device) 
+      #  graph_module.to(DianaModule.device) 
         self.gmodule = graph_module
         self._integrized = False 
         self.train_dataset = {} 
@@ -287,62 +287,64 @@ class DianaModule: # Base class for all diana models
         MyClass = getattr(my_module, type) 
         self.optimizer = MyClass(self.gmodule.parameters() , *args, **kwargs) 
     
-    def initialize_quantization(self, count = 400): 
+
+    def initialize_quantization(self, count = None, batch_size = 512): 
         self.start_observing()
-        for i in range(count ): 
-            idx  = randint(0 , self.validation_dataset['size'] -2 )
-            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
-    
-            if len(x.shape) == 3 : 
-                x = x.unsqueeze(0).to(DianaModule.device)
-                _ = self.gmodule(x) 
+        
+        if count == None: 
+            count = floor(self.train_dataset['size']/ batch_size) 
+        
+        data_loader =  ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, pin_memory=True, shuffle=True)
+        for idx , data in enumerate(data_loader): 
+             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+             _  = self.gmodule(x) 
+             count -=1
+             if count ==0: 
+                break
         self.stop_observing() 
         for _,module in self.named_modules(): 
-            if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
-                        module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
+            if (type(module) == DIANAConv2d or isinstance(module, DIANALinear)) or (isinstance(module, _QActivation) and type(module) != AnalogOutIdentity):  
+                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
     
-    def initialize_quantization_no_activation(self, count = 400): 
+    def initialize_quantization_no_activation(self, count = None, batch_size = 512): 
         for _ , module in self.gmodule.named_modules(): 
             if isinstance(module , _QModule) and not isinstance(module , _QActivation): 
                 module.start_observing()
-        for i in range(count ): 
-            idx  = randint(0 , self.validation_dataset['size'] -2 )
-            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
-    
-            if len(x.shape) == 3 : 
-                x = x.unsqueeze(0).to(DianaModule.device)
-                _ = self.gmodule(x) 
+        if count == None: 
+            count = floor(self.train_dataset['size']/ batch_size) 
+        
+        data_loader =  ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, pin_memory=True, shuffle=True)
+        for idx , data in enumerate(data_loader): 
+             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+             _  = self.gmodule(x) 
+             count -=1
+             if count ==0: 
+                break
         for _ , module in self.gmodule.named_modules(): 
-            if isinstance(module , _QModule) and not isinstance(module ,_QActivation): 
+            if isinstance(module , _QModule) and isinstance(module ,_QActivation): 
                 module.stop_observing()
                 if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
                     module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-       
-                
-
-    def initialize_quantization_activations(self ,count =None) : 
+                    
+    def initialize_quantization_activations(self ,count =None, batch_size = 512) : 
         for _ , module in self.gmodule.named_modules(): 
             if isinstance(module , _QActivation): 
                 module.start_observing()
         if count == None: 
-            count = self.validation_dataset['size']
+            count = floor(self.train_dataset['size']/ batch_size) 
         
-        data_loader =  ut.DataLoader(self.validation_dataset['dataset'], batch_size=512, pin_memory=True)
-        #for i in range(count ): 
-        #    x, _ = self.validation_dataset['dataset'].__getitem__(i) .to(DianaModule.device)
-    
-        #    if len(x.shape) == 3 : 
-        #        x = x.unsqueeze(0)
-        #        _ = self.gmodule(x) 
+        data_loader =  ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, pin_memory=True, shuffle=True)
         for idx , data in enumerate(data_loader): 
              x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
              _  = self.gmodule(x) 
+             count -=1
+             if count ==0: 
+                break 
         for _ , module in self.gmodule.named_modules(): 
             if isinstance(module ,_QActivation): 
                 module.stop_observing()
                 if not isinstance(module , AnalogOutIdentity):
                     torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) ) 
-
 
 
 

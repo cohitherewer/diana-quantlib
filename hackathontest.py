@@ -1,10 +1,10 @@
-from sched import scheduler
 from DianaModules.models.cifar10.LargeResnet import resnet20
 import torchvision
 import torchvision.datasets as ds 
 from DianaModules.utils.BaseModules import DianaModule
 from DianaModules.utils.serialization.Loader import ModulesLoader
 from DianaModules.utils.serialization.Serializer import ModulesSerializer
+from DianaModules.core.Operations import DIANAReLU
 from DianaModules.utils.verification.SIMDmodelverifier import SIMDVerifier
 from pathlib import Path
 import torch 
@@ -51,18 +51,30 @@ serializer.dump(module_descriptions_pth)
 #endregion
 
 #Linear Layers Quantization 
-_Mixed_model.initialize_quantization_no_activation(1)
+_Mixed_model.gmodule.to(torch.device("cuda:0")) 
+_Mixed_model.initialize_quantization()
 print("Resnet20 linear layer quantized before training: " , _Mixed_model.evaluate_model()[1] ) 
 FQ_weights = output_weights_path + "/FQ_weights.pth" 
+test_weights = output_weights_path + "/Ftest_weights.pth" 
 #region train FQ
-#_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule , device_ids=[0,1]).cuda()
-_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(FQ_weights)['state_dict']) )
+_Mixed_model.gmodule = nn.DataParallel(_Mixed_model.gmodule , device_ids=[0,1]).cuda()
+#_Mixed_model.gmodule.load_state_dict(DianaModule.remove_data_parallel(torch.load(FQ_weights)['state_dict']) )
 
 ###print("Current_acc: ", current_acc)
-#_Mixed_model.gmodule.to(device) 
+for _, module in _Mixed_model.named_modules(): 
+    if isinstance(module, DIANAReLU)  :
+        module.freeze() 
 optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters() , lr=0.1 , momentum=0.4) 
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer= optimizer, mode='max' , factor=0.1, patience=4)
-#params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=120, model_save_path=FQ_weights , scheduler = scheduler) # training with scale of layer before relu clipped to 2 
+params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=10, model_save_path=test_weights , scheduler = scheduler) # training with scale of layer before relu clipped to 2 
+for _, module in _Mixed_model.named_modules(): 
+    if isinstance(module, DIANAReLU)  :
+        module.thaw() 
+print("FINISHED TRAINING WITHOUT ACT")
+optimizer = torch.optim.SGD(_Mixed_model.gmodule.parameters() , lr=0.001 , momentum=0.4) 
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer= optimizer, mode='max' , factor=0.1, patience=4)
+params =  DianaModule.train(_Mixed_model.gmodule,optimizer,data_loader, epochs=10, model_save_path=test_weights , scheduler = scheduler) # training with scale of layer before relu clipped to 2 
+
 #endregion 
 _Mixed_model.gmodule.to(device)
 print("Resnet20 linear layer quantized after training: " , _Mixed_model.evaluate_model()[1] )  

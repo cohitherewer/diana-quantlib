@@ -17,6 +17,5 @@ class LinearLayerQuantizer(Editor):
         for _ , mod in g.named_modules(): 
             if isinstance(mod , _QModule) and mod._is_quantised & True == False: 
                 mod.stop_observing()
-                # except output layer
                 mod.scale = torch.exp2(torch.round(torch.log2(mod.scale)))
         return g
