@@ -1,7 +1,7 @@
 
 data/*
 .vscode/*
-DianaModules/models/*
+DianaModules/models/imagenet
 *.pyc
 # Byte-compiled / optimized / DLL files
 __pycache__/
