@@ -24,12 +24,14 @@ class AnalogNoiseEnablerFinder(Finder) :
     def check_aps_commutativity(self, aps: List[DianaAps]) -> bool:
         return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
 class AnalogNoiseEnablerApplier(Applier) : 
-    def __init__(self):
+    def __init__(self, enable_noise = False):
         super().__init__()
+        self.enable_noise =enable_noise
     def _apply(self, g: fx.GraphModule, ap: DianaAps, id_: str) -> fx.GraphModule:
         node = ap.node
         module = g.get_submodule(node.target) 
-        #module.enable() #TODO UNCOMMENT THIS LINEE LATER
+        if self.enable_noise: 
+            module.enable()
         # fix eps tunnels so they aren't removed in the epstunnel remover step 
         prev_eps_tunnel : EpsTunnel= g.get_submodule([p for p in node.all_input_nodes][0].target)
         next_eps_tunnel : EpsTunnel= g.get_submodule([u for u in node.users][0].target)
@@ -41,6 +43,6 @@ class AnalogNoiseEnablerApplier(Applier) :
 
 
 class AnalogNoiseEnabler(Rewriter): #insert quantidentities between 
-    def __init__(self):
-       super(AnalogNoiseEnabler, self).__init__(name='AnalogNoiseEnabler', symbolic_trace_fn=quantlib_symbolic_trace,finder= AnalogNoiseEnablerFinder(), applier=AnalogNoiseEnablerApplier()) 
+    def __init__(self, enable_noise = False):
+       super(AnalogNoiseEnabler, self).__init__(name='AnalogNoiseEnabler', symbolic_trace_fn=quantlib_symbolic_trace,finder= AnalogNoiseEnablerFinder(), applier=AnalogNoiseEnablerApplier(enable_noise = enable_noise)) 
 

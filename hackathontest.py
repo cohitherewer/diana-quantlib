@@ -23,12 +23,14 @@ device = torch.device('cuda:1')
 FP_weights =output_weights_path + "/FP_weights.pth"
 model = resnet20() # Floating point 
 model.load_state_dict(DianaModule.remove_data_parallel(torch.load(FP_weights, map_location='cpu')['state_dict']) )
+
 #region float_point_train
 ###model = nn.DataParallel(model, device_ids=[0 , 1]).cuda() 
 ###model.to(device)
 ###current_acc = torch.load(FP_weights)['acc']
 ###optimizer = torch.optim.SGD(model.parameters(), lr = 0.0001 ) 
 ###DianaModule.train(model, optimizer ,data_loader=data_loader , epochs=120 , model_save_path=FP_weights , current_acc=current_acc)
+
 #endregion
 #region Fake_quantization
 module_descriptions_pth = "/imec/other/csainfra/nada64/DianaTraining/serialized_models/resnet20.yaml"
@@ -44,8 +46,8 @@ _Mixed_model.attach_validation_dataset(test_dataset,train_scale)
 #base_module_end
 
 #region model_serialization(default) 
-#serializer = ModulesSerializer(_Mixed_model.gmodule)  
-#serializer.dump(module_descriptions_pth) 
+serializer = ModulesSerializer(_Mixed_model.gmodule)  
+serializer.dump(module_descriptions_pth) 
 #endregion
 
 #Linear Layers Quantization 

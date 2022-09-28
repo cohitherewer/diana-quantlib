@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Union
 import matplotlib as plt
 from numpy import isin 
 
-from DianaModules.core.Operations import AnalogConv2d, AnalogOutIdentity, DIANAConv2d, DIANAIdentity, DIANAReLU, DianaBaseOperation
+from DianaModules.core.Operations import AnalogConv2d, AnalogOutIdentity, DIANAConv2d, DIANAIdentity, DIANALinear, DIANAReLU, DianaBaseOperation
 from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
 from DianaModules.utils.converters.float2fake import F2FConverter
 from DianaModules.utils.converters.hwquantization import HWMappingConverter
@@ -297,6 +297,9 @@ class DianaModule: # Base class for all diana models
                 x = x.unsqueeze(0).to(DianaModule.device)
                 _ = self.gmodule(x) 
         self.stop_observing() 
+        for _,module in self.named_modules(): 
+            if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
+                        module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
     
     def initialize_quantization_no_activation(self, count = 400): 
         for _ , module in self.gmodule.named_modules(): 
@@ -312,7 +315,7 @@ class DianaModule: # Base class for all diana models
         for _ , module in self.gmodule.named_modules(): 
             if isinstance(module , _QModule) and not isinstance(module ,_QActivation): 
                 module.stop_observing()
-                if type(module) == DIANAConv2d:  
+                if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
                     module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
        
                 

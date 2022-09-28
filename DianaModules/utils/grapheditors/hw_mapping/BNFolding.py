@@ -73,12 +73,12 @@ class BNFolderApplier(NNModuleApplier):
         g.graph.erase_node(node_bn)
 
         #step 3: requantize the original modules , if it's per-outchannel_weights then scale the max min float values and reinitialize quant hyper parameters. if it's per-array, then set _is_quantised to false and take care of it after the conversion 
-        if module_linear.scale.numel() >= 1: #per _outchannel weights 
-            module_linear.max_float *= scale 
-            module_linear.min_float *= scale 
-            module_linear.redefine_qhparams({'bitwidth': 8 , 'signed': True}) # digital core qrange spec
-        else : 
-            module_linear._is_quantised &= False # set quantization to false 
+        #if module_linear.scale.numel() >= 1: #per _outchannel weights 
+        #    module_linear.max_float *= scale 
+        #    module_linear.min_float *= scale 
+        #    module_linear.redefine_qhparams({'bitwidth': 8 , 'signed': True}) # digital core qrange spec
+        #else : 
+        module_linear._is_quantised &= False # set quantization to false 
 
         return g
 class BNFolder(ComposedEditor):   

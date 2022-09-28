@@ -29,7 +29,7 @@ from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 
 
 class HWMappingConverter(ComposedEditor) : 
-    def __init__(self, custom_editor : List[Editor] = []) : 
+    def __init__(self, custom_editor : List[Editor] = [], enable_noise =False) : 
         editors = [
             BNFolder() , 
             LinearLayerQuantizer() ,
@@ -47,7 +47,7 @@ class HWMappingConverter(ComposedEditor) :
         
         editor_post = [   
             EpsTunnelConstructSimplifier(),
-           AnalogNoiseEnabler() ,
+           AnalogNoiseEnabler(enable_noise) ,
             
         
         ]
