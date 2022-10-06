@@ -87,7 +87,7 @@ class DianaExporter(DORYExporter) :
         # Set graph optimization level
         sess_options.graph_optimization_level = rt.GraphOptimizationLevel.ORT_ENABLE_BASIC
         # To enable model serialization after graph optimization set this
-        data_folder =path+ "/optimized/"+onnxname+"optimized_model_NO_ANNOTATION.onnx" 
+        data_folder =path+ "/" +onnxname+"optimized_model_NO_ANNOTATION.onnx" 
         sess_options.optimized_model_filepath = data_folder
         # generate optimized graph from non-annotated model 
       
