@@ -16,6 +16,8 @@ from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
 from DianaModules.utils.converters.float2fake import F2FConverter
 from DianaModules.utils.converters.hwquantization import HWMappingConverter
 from DianaModules.utils.onnx import DianaExporter
+from DianaModules.utils.serialization.Serializer import ModulesSerializer
+
 from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qmodules import _PACTActivation
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.editing.editors.retracers import QuantLibRetracer
@@ -36,27 +38,30 @@ import importlib
 
 class DianaModule: # Base class for all diana models  
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
       #  graph_module.to(DianaModule.device) 
         self.gmodule = graph_module
         self._integrized = False 
         self.train_dataset = {} 
         self.validation_dataset = {}
+        
     def start_observing(self): #before starting training with FP 
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,( _QModule,HarmonisedAdd)) : 
                
                 module.start_observing()
-
+                
     def stop_observing(self): # before starting training with fake quantised network  
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,(_QModule, HarmonisedAdd) ) : 
                 module.stop_observing()
-                 
+                    
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): # before mapping scale and retraining # TODO change from new_bitwdith and signed to list of qrangespecs or an arbitary number of kwqrgs  
         for _ ,module in enumerate(self.gmodule.modules()): 
             if isinstance(module , _QModule)  and isinstance(module ,DianaBaseOperation) and module._is_quantised: 
                 module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
+                
     def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
         for _ ,module in enumerate(self.gmodule.modules()):  
             if isinstance(module,_QActivation )and module._is_quantised and type(module) != AnalogOutIdentity: # (type(module) == DIANAIdentity or type(module)==DIANAReLU) : # only clip scale of input quantizers
@@ -71,10 +76,13 @@ class DianaModule: # Base class for all diana models
             
     def forward(self, x : torch.Tensor) : 
         return self.gmodule(x)
+    
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return self.forward(*args)
+    
     def modules(self): 
         return self.gmodule.modules()
+    
     def named_modules(self): 
         return self.gmodule.named_modules()
     
@@ -104,9 +112,8 @@ class DianaModule: # Base class for all diana models
         
         return converted_graph
     
-    def map_to_hw(self , custom_editors : List[Editor]=[])  : 
+    def map_to_hw(self , custom_editors : List[Editor]=[]): 
         # free relus upper boun d
-        
         for _ , mod in self.named_modules(): 
             if isinstance(mod , DIANAReLU) : 
                 mod.freeze() 
@@ -116,10 +123,9 @@ class DianaModule: # Base class for all diana models
             x = x.unsqueeze(0)
         with torch.no_grad(): 
             self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}}, input=x)
-        
         #endregion
-    def integrize_layers(self)    : 
-        
+
+    def integrize_layers(self):
         converter = LayerIntegrizationConverter()
         x, _ = self.validation_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
@@ -128,7 +134,6 @@ class DianaModule: # Base class for all diana models
             self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}})
         self._integrized = True
         pass 
-
 
     def export_model(self, data_folder : str): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
@@ -280,13 +285,11 @@ class DianaModule: # Base class for all diana models
             qSc_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
             #DianaModule.plot_metrics(qSc_metrics ) 
             print("Finished Final HW Model...")
-        
 
     def configure_optimizer(self, type : str = 'SGD' , *args , **kwargs):  # case sensitive 
         my_module = importlib.import_module("torch.optim")
         MyClass = getattr(my_module, type) 
         self.optimizer = MyClass(self.gmodule.parameters() , *args, **kwargs) 
-    
 
     def initialize_quantization(self, count = None, batch_size = 512): 
         self.start_observing()
@@ -346,8 +349,26 @@ class DianaModule: # Base class for all diana models
                 if not isinstance(module , AnalogOutIdentity):
                     torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) ) 
 
+    def quantize(self, dataset, dataset_scale, quantize_activations=True):
+        self.attach_train_dataset(dataset, dataset_scale)
+        # we just use the same dataset, as we don't use the train/eval routine
+        self.attach_validation_dataset(dataset, dataset_scale)
 
-
+        if quantize_activations == False:
+            for _, module in self.named_modules(): 
+                if isinstance(module, DIANAReLU)  :
+                    module.freeze()
+            self.initialize_quantization_no_activation()
+        else:
+            for _, module in self.named_modules(): 
+                if isinstance(module, DIANAReLU)  :
+                    module.thaw() 
+            self.initialize_quantization()
+    
+    def serialize_module_descriptors(self, descriptors_file):
+        serializer = ModulesSerializer(self.gmodule)
+        serializer.dump(descriptors_file)
+        
     @classmethod
     def return_DFS (cls,  node : fx.node.Node,  depth : int)  :
         ls : List[fx.node.Nodes] = [] 
@@ -359,7 +380,6 @@ class DianaModule: # Base class for all diana models
             ls.append(users[0]) 
             n = users[0]
         return ls
-            
 
     def evaluate_model(self, criterion=nn.CrossEntropyLoss() , batch_size=128) : 
         if self._integrized: 
@@ -383,7 +403,6 @@ class DianaModule: # Base class for all diana models
 
             running_loss += loss.item() *x.size(0) 
             running_correct += torch.sum(predictions==y) .item()
-            
  
         e_loss = running_loss / len(data_loader['validate'].dataset)
         e_acc = running_correct / len(data_loader['validate'].dataset) 
