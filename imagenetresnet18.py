@@ -83,10 +83,9 @@ fp = DianaModule(fp_model)
 fp.set_optimizer('SGD', lr =0.1 , momentum=0.9)
 checkpoint_callback = ModelCheckpoint(monitor = "val_acc" , dirpath='zoo/imagenet/resnet18/FP/',filename='imgnet-{epoch:02d}-{val_acc:.4f}' ,save_top_k=1)
 callbacks = [checkpoint_callback ,EarlyStopping(monitor="val_acc", mode="max") ]
-max_epochs = 120
+max_epochs = 200
 trainer = pl.Trainer(accelerator = "gpu",strategy="ddp",  devices = -1 , max_epochs =max_epochs , callbacks=callbacks,logger=CSVLogger(save_dir="logs/FP"))
-trainer.fit(fp ,train_dataloader)
-trainer.validate(DianaModule(fp_model), validation_dataloader)
+trainer.fit(fp ,train_dataloader , validation_dataloader)
 #print("quant init")
 #for i,  data in   enumerate(train_dataloader):  
 #    x , y = data[0], data[1]
