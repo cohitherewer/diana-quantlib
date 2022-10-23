@@ -157,7 +157,7 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
     def training_step_end(self, outputs) : 
 
         self.train_acc(outputs["pred"] ,outputs["true"] )
-        self.log("train_acc" , self.train_acc ,on_step=False,  on_epoch=True, prog_bar=True)
+        self.log("train_acc" , self.train_acc ,on_step=False,  on_epoch=True, prog_bar=True, sync_dist=True)
 
         return outputs["loss"]
         
