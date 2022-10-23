@@ -52,4 +52,9 @@ When defining your custom quantized classes, make sure to register your own auto
 
 ## Extending Quantlib 
 [Check Model Conversion](#model-conversion)
+
+
+Notes: 
+dont use same relu module multiple times
+view instead of flatten 
        

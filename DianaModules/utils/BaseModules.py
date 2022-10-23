@@ -8,9 +8,6 @@ from random import randint
 import sched
 from typing import Any, Dict, List, Union
 
-import matplotlib as plt
-from numpy import isin 
-
 from DianaModules.core.Operations import AnalogConv2d, AnalogOutIdentity, DIANAConv2d, DIANAIdentity, DIANALinear, DIANAReLU, DianaBaseOperation
 from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
 from DianaModules.utils.converters.float2fake import F2FConverter
@@ -30,18 +27,22 @@ import quantlib.backends as qb
 from torch import optim 
 import torch.utils.data as ut 
 from  torch.utils.data import Dataset as ds  
-
 import importlib
-
-
-class DianaModule: # Base class for all diana models  
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+import pytorch_lightning as pl 
+import torchmetrics 
+class DianaModule(pl.LightningModule): # Base class for all diana models  
     def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
-        graph_module.to(DianaModule.device) 
+        super().__init__()
         self.gmodule = graph_module
         self._integrized = False 
-        self.train_dataset = {} 
-        self.validation_dataset = {}
+        self.train_dataloader = {} 
+        self.validation_dataloader = {}
+        self.quant_dataloader  = {} 
+        self.optimizer = None 
+        self.train_acc = torchmetrics.Accuracy()
+        self.valid_acc = torchmetrics.Accuracy()
+        #self.test_acc = torchmetrics.Accuracy() 
+    
     def start_observing(self): #before starting training with FP 
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,( _QModule,HarmonisedAdd)) : 
@@ -52,44 +53,30 @@ class DianaModule: # Base class for all diana models
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,(_QModule, HarmonisedAdd) ) : 
                 module.stop_observing()
-                 
-    def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): # before mapping scale and retraining # TODO change from new_bitwdith and signed to list of qrangespecs or an arbitary number of kwqrgs  
-        for _ ,module in enumerate(self.gmodule.modules()): 
-            if isinstance(module , _QModule)  and isinstance(module ,DianaBaseOperation) and module._is_quantised: 
-                module.map_scales(new_bitwidth=new_bitwidth, signed = signed, HW_Behaviour=HW_Behaviour)
-    def clip_scales_pow2(self): # Now it's clipping scales to the nearest power of 2 , but for example if the qhinitparamstart is mean std we can check the nearest power of 2 that would contain a distribution range of values that we find acceptable 
-        for _ ,module in enumerate(self.gmodule.modules()):  
-            if isinstance(module,_QActivation )and module._is_quantised and type(module) != AnalogOutIdentity: # (type(module) == DIANAIdentity or type(module)==DIANAReLU) : # only clip scale of input quantizers
-                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-            
-            elif type(module) == DIANAConv2d: 
-                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )    
-
-
-            elif (issubclass(type(module),DianaModule) and self is not module) : 
-                module.clip_scales() # recursion
-            
+   
     def forward(self, x : torch.Tensor) : 
         return self.gmodule(x)
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
-        return self.forward(*args)
-    def modules(self): 
-        return self.gmodule.modules()
-    def named_modules(self): 
-        return self.gmodule.named_modules()
     
+    def freeze_clipping_bound(self): 
+        for _ , module in self.gmodule.named_modules(): 
+            if isinstance(module ,DIANAReLU) : 
+                module.freeze()
+    def unfreeze_clipping_bound(self) -> None:
+        for _ , module in self.gmodule.named_modules(): 
+            if isinstance(module ,DIANAReLU) : 
+                module.thaw()
     @classmethod 
     def from_trainedfp_model(cls, model: nn.Module , modules_descriptors  = None): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
-            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} ,'meanstd' , 'DIANA')), # upper clip is updated during training
-            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here 
-            ({'types': ( 'Linear' )}, ('per-outchannel_weights', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
+            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} ,'minmax' , 'DIANA')), # upper clip is updated during training
+            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'minmax','DIANA')), # can use per-outchannel_weights here 
+            ({'types': ( 'Linear' )}, ('per-outchannel_weights', {'bitwidth': 8, 'signed': True},  'minmax','DIANA')),
         )
-        analogcoredescriptionspec =  ('per-array', 'ternary' , 'meanstd' )
+        analogcoredescriptionspec =  ('per-array', 'ternary' , 'minmax' )
             
         # `AddTreeHarmoniser` argument
-        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA'  )  
+        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'minmax', 'DIANA'  )  
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
 
         converter  =  F2FConverter(
@@ -111,24 +98,22 @@ class DianaModule: # Base class for all diana models
             if isinstance(mod , DIANAReLU) : 
                 mod.freeze() 
         converter = HWMappingConverter(custom_editor=custom_editors)
-        x, _ = self.validation_dataset['dataset'].__getitem__(0)
+        x, _ = self.train_dataloader['dataloader'].dataset.__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
         with torch.no_grad(): 
-            self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}}, input=x)
+            self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataloader['scale']}}, input=x)
         
-        #endregion
     def integrize_layers(self)    : 
         
         converter = LayerIntegrizationConverter()
-        x, _ = self.validation_dataset['dataset'].__getitem__(0)
+        x, _ = self.train_dataloader['dataloader'].dataset.__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
         with torch.no_grad(): 
-            self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.validation_dataset['scale']}})
+            self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataloader['scale']}})
         self._integrized = True
         pass 
-
 
     def export_model(self, data_folder : str): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
@@ -137,215 +122,117 @@ class DianaModule: # Base class for all diana models
         exporter = DianaExporter()
         from pathlib import Path
        
-        x, _ = self.validation_dataset['dataset'].__getitem__(0)
+        x, _ = self.train_dataloader['dataloader'].dataset.__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
-        x = (x / self.validation_dataset['scale'] ). floor() #integrize 
+        x = (x / self.train_dataloader['scale'] ). floor() #integrize 
         exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder)
         exporter.dump_features(network=self.gmodule, x=x, path=data_folder ) 
         pass 
     
-    @classmethod
-    def plot_training_metrics(metrics : Dict [str , Dict[str, list]]) : 
-        fig, (plot1, plot2) = plt.subplots(nrows=1, ncols=2)
-        plot1.plot(metrics['train']['loss'], label='train loss')
-        plot1.plot(metrics['validate']['loss'], label='val loss')
-        lines, labels = plot1.get_legend_handles_labels()
-        plot1.legend(lines, labels, loc='best')
+    def attach_train_dataloader(self, dataloader, scale : torch.Tensor = torch.Tensor([1])):        
+        self.train_dataloader['scale'] = scale 
+        self.train_dataloader['dataloader'] = dataloader 
+        self.train_dataloader['size'] = len(dataloader.dataset) 
 
-        plot2.plot(metrics['train']['acc'], label='train acc')
-        plot2.plot(metrics['validate']['acc'], label='val acc')
-        plot2.legend()
-    
-    def attach_train_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])):        
-        self.train_dataset['scale'] = scale 
-        self.train_dataset['dataset'] = dataset
-        self.train_dataset['size'] = len(dataset)
+    def attach_validation_dataloader(self, dataloader , scale : torch.Tensor = torch.Tensor([1])): 
+        self.validation_dataloader['scale'] = scale 
+        self.validation_dataloader['dataloader'] = dataloader 
+        self.validation_dataloader['size'] = len(dataloader.dataset) 
 
-    def attach_validation_dataset(self, dataset: ut.Dataset , scale : torch.Tensor = torch.Tensor([1])): 
-        self.validation_dataset['scale'] = scale 
-        self.validation_dataset['dataset'] = dataset
-        self.validation_dataset['size'] = len(dataset ) 
-
-    @classmethod
-    def train(cls, model: nn.Module, optimizer , data_loader : Dict[str, ut.DataLoader ], epochs = 100 , criterion = nn.CrossEntropyLoss() , scheduler: Union[None, optim.lr_scheduler._LRScheduler]=None , model_save_path : str = None , integrized = False , scale : torch.Tensor = None, current_acc = 0 , device = None ): 
-        metrics = {'train': {'loss': [], 'acc': []} , 'validate': {'loss': [], 'acc': []} }
-        max_val_acc = current_acc 
-        if device is None: 
-            device = cls.device
-        assert (model and optimizer) 
-        for e in range(epochs):     
-            for stage in ['train', 'validate']: 
-                running_loss = 0 
-                running_correct = 0
-                if stage == 'train': 
-                    model.train() 
-                else : 
-                    model.eval () 
-            
-                for i,data in enumerate(data_loader[stage]): 
-                    
-                    x , y = data[0].to(device), data[1].to(device)
-                    if integrized: 
-                        x = torch.floor(x / scale)
-                    optimizer.zero_grad() 
-                    if stage == 'validate': 
-                        with torch.no_grad(): 
-                            yhat = model(x)
-                            loss = criterion(yhat, y) 
-                        
-                    else: 
-                        with torch.set_grad_enabled(True):
-                            yhat = model(x) 
-                
-                            loss = criterion(yhat, y) 
-                            loss.backward() 
-                      
-                            optimizer.step() 
-                    
-                    predictions = torch.argmax(yhat , 1)
-
-                    running_loss += loss.item() *x.size(0) 
-                    running_correct += torch.sum(predictions==y) .item()
-                    
+    def attach_quantization_dataloader(self, dataloader ): 
+        self.quant_dataloader['dataloader'] = dataloader 
+        self.quant_dataloader['size'] = len(dataloader.dataset) 
          
-                e_loss = running_loss / len(data_loader[stage].dataset)
-                e_acc = running_correct / len(data_loader[stage].dataset) 
-                print(f'Epoch {e+1} \t\t {stage} stage... Loss: {e_loss:.4f} Accuracy :{e_acc:.4f}')
-                if stage == 'validate' and scheduler is not None: 
-                    if type(scheduler)== optim.lr_scheduler.ReduceLROnPlateau: 
-                        scheduler.step(e_acc)
-                    else: 
-                        scheduler.step()
-                       
-                metrics[stage]['loss'].append(e_loss)
-                metrics[stage]['acc'].append(e_acc)
-                if stage == 'validate' and e_acc > max_val_acc and model_save_path is not None: 
-                    # save best state dict acc model on 
-                    torch.save ({
-                        'epoch': e,
-                        'state_dict': model.state_dict(),
-                        'loss': e_loss,
-                        'acc' : e_acc 
-                    } , model_save_path)
-                    max_val_acc = e_acc 
-                    pass 
-  
-        return metrics  
 
-    def QA_iterative_train  (self, criterion = nn.CrossEntropyLoss() , scheduler: Union[None , optim.lr_scheduler._LRScheduler]=None,  epochs = 100 , batch_size = 128 , output_weights_path : Union[str ,None] = None , train_FP_model : bool = True ,train_8bit_model : bool = True , train_HWmapped_model : bool = True, train_HW_model : bool = True): # example of workflow
-        data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=batch_size, shuffle=True  ,pin_memory=True)}
-        #Iteration 1 - FP Training & pass quantisation specs of 8-bit to model 
+    def training_step(self, batch, batch_idx, *args, **kwargs) :
+        x , y = batch  
+        if self._integrized: 
+            x = torch.floor(x / self.train_scale) 
+        yhat = self.gmodule(x)
+        loss = nn.CrossEntropyLoss()(yhat , y)
+        self.log("train_loss", loss , prog_bar=True)
+        # acc 
+        return {"loss": loss, "pred":yhat, "true":y}
+    def training_step_end(self, outputs) : 
 
+        self.train_acc(outputs["pred"] ,outputs["true"] )
+        self.log("train_acc" , self.train_acc ,on_step=False,  on_epoch=True, prog_bar=True)
+
+        return outputs["loss"]
         
-        if train_FP_model:  
-            print("Training FP Model...")
-            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FPweights.pth' if output_weights_path is not None else None
-            self.configure_optimizer('SGD' ,lr = 0.01 , momentum = 0.1, weight_decay=5e-5)
-            FP_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
-            print("Finished Training FP Model...")
-            #DianaModule.plot_training_metrics(FP_metrics) 
-                 
-        #Iteration 2 - Fake Quantistion all to 8 bit 
-        self.gmodule = DianaModule.from_trainedfp_model(self.gmodule) #f2f 
-        self.initialize_quantization() 
-        self.gmodule.to(DianaModule.device)
-        if train_8bit_model: 
-            print("Training 8bit Model...")
-            self.configure_optimizer('SGD', lr = 0.04 , momentum=0.9,  weight_decay=1e-5)
-            out_path = output_weights_path + "/"+self.gmodule._get_name()+'_FQ8weights.pth' if output_weights_path is not None else None
-            q8b_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
-            print("Finished Training 8bit Model...")
-            #DianaModule.plot_metrics(q8b_metrics ) 
-            
-        #Iteration 3 - Input HW specific quantisation, map scales 
-        self.map_scales(HW_Behaviour=True)
-      
-        if train_HWmapped_model:  
-            print("Training HW_Mapped Model...")
-           
-            self.configure_optimizer( lr = 0.04 , momentum=0.9,  weight_decay=1e-5 )
-            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQMappedweights.pth'   if output_weights_path is not None else None
-            qHW_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
-            #DianaModule.plot_metrics(qHW_metrics)
-            print("Finished Training HW_Mapped Model...")
-     
-             
-        #Iteration 4 - clip scales to the power of 2 #TODO Enable noise nodes and retrain 
-        self.clip_scales_pow2() 
-        if train_HW_model: 
-            print("Training Final HW Model...")
-            self.configure_optimizer( lr = 0.04 , momentum=0.9,  weight_decay=1e-5 )
-            out_path = output_weights_path +"/"+ self.gmodule._get_name()+'_FQHWweights.pth' if output_weights_path is not None else None
-            qSc_metrics =  DianaModule.train(self.gmodule, self.optimizer,data_loader, epochs, criterion, scheduler, model_save_path=out_path )
-            #DianaModule.plot_metrics(qSc_metrics ) 
-            print("Finished Final HW Model...")
         
+    def test_step(self, batch, batch_idx, *args, **kwargs) : # for quantization
+        x , y = batch 
+        _ = self.gmodule(x) 
+        pass 
+        #x , y = batch  
+        #if self._integrized: 
+        #    x = torch.floor(x / self.train_scale) 
+        #yhat = self.gmodule(x)
+        #loss = nn.CrossEntropyLoss()(yhat , y)
+        #self.test_acc(yhat , y) 
+        #self.log("test_loss", loss)
+        #self.log("test_acc" , self.test_acc, on_step=True, prog_bar=True) 
+    def validation_step(self, batch, batch_idx, *args, **kwargs) :
+        x , y = batch  
+        if self._integrized: 
+            x = torch.floor(x / self.train_scale) 
+        yhat = self.gmodule(x)
 
-    def configure_optimizer(self, type : str = 'SGD' , *args , **kwargs):  # case sensitive 
+        loss = nn.CrossEntropyLoss()(yhat , y)
+        
+        
+        
+        self.log("val_loss", loss , prog_bar=True ,sync_dist=True)
+        return {"loss": loss, "pred":yhat, "true":y}
+        
+    def validation_step_end(self, outputs) :
+        self.valid_acc(outputs["pred"] ,outputs["true"] )
+        self.log("val_acc" ,self.valid_acc,  on_epoch=True , prog_bar=True, sync_dist=True)
+        return outputs["loss"]
+    def set_optimizer(self, type : str = 'SGD' , *args , **kwargs):  # case sensitive 
         my_module = importlib.import_module("torch.optim")
         MyClass = getattr(my_module, type) 
         self.optimizer = MyClass(self.gmodule.parameters() , *args, **kwargs) 
+        self.scheduler  = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer , mode='max',patience=5)
     
-    def initialize_quantization(self, count = 400): 
-        self.start_observing()
-        for i in range(count ): 
-            idx  = randint(0 , self.validation_dataset['size'] -2 )
-            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
-    
-            if len(x.shape) == 3 : 
-                x = x.unsqueeze(0).to(DianaModule.device)
-                _ = self.gmodule(x) 
-        self.stop_observing() 
-        for _,module in self.named_modules(): 
-            if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
-                        module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-    
-    def initialize_quantization_no_activation(self, count = 400): 
-        for _ , module in self.gmodule.named_modules(): 
-            if isinstance(module , _QModule) and not isinstance(module , _QActivation): 
-                module.start_observing()
-        for i in range(count ): 
-            idx  = randint(0 , self.validation_dataset['size'] -2 )
-            x, _ = self.validation_dataset['dataset'].__getitem__(idx) 
-    
-            if len(x.shape) == 3 : 
-                x = x.unsqueeze(0).to(DianaModule.device)
-                _ = self.gmodule(x) 
-        for _ , module in self.gmodule.named_modules(): 
-            if isinstance(module , _QModule) and not isinstance(module ,_QActivation): 
-                module.stop_observing()
-                if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
-                    module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-       
-                
-
-    def initialize_quantization_activations(self ,count =None) : 
-        for _ , module in self.gmodule.named_modules(): 
-            if isinstance(module , _QActivation): 
-                module.start_observing()
-        if count == None: 
-            count = self.validation_dataset['size']
+    def configure_optimizers(self):
         
-        data_loader =  ut.DataLoader(self.validation_dataset['dataset'], batch_size=512, pin_memory=True)
-        #for i in range(count ): 
-        #    x, _ = self.validation_dataset['dataset'].__getitem__(i) .to(DianaModule.device)
+        return {"optimizer":self.optimizer , "lr_scheduler": {"scheduler": self.scheduler ,"monitor": "val_acc"} } 
     
-        #    if len(x.shape) == 3 : 
-        #        x = x.unsqueeze(0)
-        #        _ = self.gmodule(x) 
-        for idx , data in enumerate(data_loader): 
-             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
-             _  = self.gmodule(x) 
-        for _ , module in self.gmodule.named_modules(): 
-            if isinstance(module ,_QActivation): 
-                module.stop_observing()
-                if not isinstance(module , AnalogOutIdentity):
-                    torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) ) 
+    def initialize_quantization(self , trainer): 
+        self.start_observing()
+        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'] ) 
+        self.stop_observing() 
+        for _,module in self.gmodule.named_modules(): 
+            if type(module) == DIANAConv2d or isinstance(module, DIANALinear) or (isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity) ):  
+                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
 
-
-
-
+    def initialize_quantization_layers(self, trainer): 
+        for _ , mod in self.gmodule.named_modules() : 
+            if isinstance(mod, _QModule) and not isinstance(mod, _QActivation): 
+                mod.start_observing()
+        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'] ) 
+        for _ , mod in self.gmodule.named_modules() : 
+            if isinstance(mod, _QModule) and not isinstance(mod, _QActivation): 
+                mod.stop_observing()
+        for _,module in self.gmodule.named_modules(): 
+            if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
+                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
+    def initialize_quantization_activations(self , trainer): 
+        for _ , mod in self.gmodule.named_modules() : 
+            if isinstance(mod, _QActivation): 
+                mod.start_observing()
+        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'] ) 
+        for _ , mod in self.gmodule.named_modules() : 
+            if isinstance(mod, _QActivation): 
+                mod.stop_observing()
+        for _,module in self.gmodule.named_modules(): 
+            if(isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity) ):  
+                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
+    pass 
+    
     @classmethod
     def return_DFS (cls,  node : fx.node.Node,  depth : int)  :
         ls : List[fx.node.Nodes] = [] 
@@ -357,36 +244,6 @@ class DianaModule: # Base class for all diana models
             ls.append(users[0]) 
             n = users[0]
         return ls
-            
-
-    def evaluate_model(self, criterion=nn.CrossEntropyLoss() , batch_size=128) : 
-        if self._integrized: 
-            print("INTEGRIZED EVALUATION")
-        self.gmodule.eval () 
-        data_loader = {'train': ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, shuffle=True, pin_memory=True) , 'validate' : ut.DataLoader(self.validation_dataset['dataset'], batch_size=batch_size, shuffle=True  ,pin_memory=True)}
-        running_loss = 0 
-        running_correct = 0 
-        for i,data in enumerate(data_loader['validate']): 
-            
-            x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
-         
-            if self._integrized: 
-                x = torch.floor(x / self.validation_dataset['scale'].to(x.device)) 
-            with torch.no_grad(): 
-                yhat = self.gmodule(x)
-                loss = criterion(yhat, y) 
-                
-            
-            predictions = torch.argmax(yhat , 1)
-
-            running_loss += loss.item() *x.size(0) 
-            running_correct += torch.sum(predictions==y) .item()
-            
- 
-        e_loss = running_loss / len(data_loader['validate'].dataset)
-        e_acc = running_correct / len(data_loader['validate'].dataset) 
-        return e_loss , e_acc 
-
     @classmethod
     def remove_data_parallel(cls,old_state_dict):
         new_state_dict = OrderedDict()

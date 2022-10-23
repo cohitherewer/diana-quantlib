@@ -1,6 +1,8 @@
+from random import randint
 import torch 
 from torch import nn
 from DianaModules.core.Operations import AnalogAccumulator, AnalogOutIdentity
+from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 
 from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
 
@@ -77,7 +79,8 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         module_activation = name_to_match_module['activation']
       
         module_eps_out    = name_to_match_module['eps_out']
-
+        if (module_activation is None): 
+            return g 
         assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
 
         # extract the parameters required to compute the requantiser's parameters
@@ -101,7 +104,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         #beta_int  = torch.floor(self.D * (-mi * gamma + beta * sigma) / (sigma * eps_out))
 
         # create the requantiser
-        new_target = id_
+        new_target = id_ + f"[{randint(0, 10000) }]"
         if module_bn is None: 
             
             gamma_int = torch.floor( self.div_max_bitwidth *eps_in             / ( eps_out))# mul then div by self.D b
@@ -187,9 +190,12 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         # ...and delete the old construct
         g.delete_submodule(node_activation.target)
         g.graph.erase_node(node_activation)  # since `node_activation` is a user of `node_bn`, we must delete it first
+    
         if node_bn is not None:
             g.delete_submodule(node_bn.target)
             g.graph.erase_node(node_bn)
+                
+
         
         return g
 

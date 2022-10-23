@@ -38,8 +38,10 @@ loader = CustomDataloader(imagenet_train_dataset ,batch_size= batch_size, num_wo
 
 a = DIANAIdentity({'bitwidth': 8 , 'signed': True} , 'per-array', 'minmax' )
 b = DIANAIdentity({'bitwidth': 8 , 'signed': True} , 'per-array', 'meanstd' )
+
 a .start_observing() 
 b.start_observing()
+
 model = nn.Sequential(a , b)
 a.to(device) 
 b.to(device) 

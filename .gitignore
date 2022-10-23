@@ -1,7 +1,9 @@
 
 data/*
 .vscode/*
+
 DianaModules/models/*
+
 *.pyc
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -132,6 +134,13 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+
+lightning_logs/*
+logs/* 
+logs/FQfrozen
+logs/FQunfrozen
+logs/HWmapped
+zoo/*
 DianaModules/models/imagenet/train_val_map.txt
 DianaModules/models/imagenet/validation_val_map.txt
-DianaModules/models/imagenet/train_val_map.txt

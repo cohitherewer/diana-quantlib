@@ -1,6 +1,7 @@
 from torch import nn 
 import yaml 
 from DianaModules.utils.converters.float2fake import F2FConverter
+from DianaModules.utils.serialization.Descriptor import ModuleDescriptor
 
 class ModulesLoader:  
     def __init__(self) -> None:

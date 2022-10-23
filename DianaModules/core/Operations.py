@@ -2,6 +2,7 @@
 from abc import abstractmethod
 import enum
 from random import randint
+from tokenize import group
 from turtle import forward
 import torch 
 from torch import Tensor, nn
@@ -32,27 +33,31 @@ class DianaBaseOperation:
     def map_scales(self, new_bitwidth=8, signed = True , HW_Behaviour=False): 
         pass
     
-    def redefine_qhparams(self : _QModule, qrangespec:               QRangeSpecType):  
+    def redefine_qhparams(self : _QModule, qrangespec:  QRangeSpecType):  
         assert(issubclass(type(self), _QModule))
         device = self.zero.device 
         self._qrange = resolve_qrangespec(qrangespec)
         zero, n_levels, step, scale = create_qhparams(self._qrange)
-        self.zero =  torch.tile(zero,     self.zero.shape).to(device)
-        self.n_levels=  torch.tile(n_levels,     self.n_levels.shape).to(device)
-        self.step=  torch.tile(step,    self.step.shape).to(device)
-        self.scale =  torch.tile(scale,   self.scale.shape).to(device)
+        self.zero =  torch.tile(zero,     self.zero.shape)
+        self.n_levels=  torch.tile(n_levels,     self.n_levels.shape)
+        self.step=  torch.tile(step,    self.step.shape)
+        self.scale =  torch.tile(scale,   self.scale.shape)
         if self._pin_offset:
             scale = get_scale(self.min_float, self.max_float, self.zero, self.n_levels, self.step)
-            self.scale.data.copy_(scale.to(device=self.scale.device))
+            self.scale.data.copy_(scale)
         else:
             zero, scale = get_zero_scale(self.min_float, self.max_float, self.n_levels, self.step)
-            self.zero.data.copy_(zero.to(device=self.scale.device))
-            self.scale.data.copy_(scale.to(device=self.scale.device))
+            self.zero.data.copy_(zero)
+            self.scale.data.copy_(scale)
         self._set_clipping_bounds()
     
     def define_bitwidth_clipping(self): 
-        self.bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) )#quantized clip lo and high
-        self.bw_clip_hi =torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) )-1 
+        if not hasattr(self, "bw_clip_hi") : 
+            self.register_buffer("bw_clip_lo", torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) ))
+            self.register_buffer("bw_clip_hi", torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) )-1 ) 
+        else: 
+            self.bw_clip_lo = torch.exp2(torch.round(torch.log2((torch.abs(self.clip_lo)/ (self.scale * self.step)))) )#quantized clip lo and high
+            self.bw_clip_hi =torch.exp2(torch.round(torch.log2((torch.abs(self.clip_hi)/ (self.scale * self.step)))) )-1 
       
         
         mask = self.clip_lo < 0
@@ -80,14 +85,9 @@ class DIANALinear(QLinear , DianaBaseOperation):
         super().stop_observing()
         self.define_bitwidth_clipping()
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        self.bw_clip_hi = self.bw_clip_hi.to(self.scale.device) 
-        self.bw_clip_lo = self.bw_clip_lo.to(self.scale.device) 
         return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
-    
-    
 
     def forward(self, x: torch.Tensor) : 
-        x = x.to(self.weight.device)
         return super().forward(x) 
 # Activations
 class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity for harmoniser adds ( Quant operation )
@@ -114,8 +114,6 @@ class DIANAIdentity(QIdentity , DianaBaseOperation): # general purpose identity 
         super().stop_observing()
         self.define_bitwidth_clipping()
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        self.bw_clip_hi =self.bw_clip_hi.to(x.device) 
-        self.bw_clip_lo= self.bw_clip_lo.to(x.device) 
     
         return self._qop(x, self.bw_clip_lo,self.bw_clip_hi, self.step, self.scale)
  
@@ -124,7 +122,6 @@ class DIANAReLU( PACTReLU  , DianaBaseOperation):
     
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, inplace)
     def call_qop(self, x: torch.Tensor) -> torch.Tensor:
-     
         return super().call_qop(x) 
     def freeze(self):
         self.clip_lo.requires_grad = False
@@ -180,21 +177,16 @@ class DIANAConv2d(QConv2d , DianaBaseOperation): #digital core
  
     def _call_qop(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         
-        
-        self.bw_clip_hi = self.bw_clip_hi.to(x.device) 
-        self.bw_clip_lo = self.bw_clip_lo.to(x.device) 
-
         return self._qop(x, self.bw_clip_lo, self.bw_clip_hi, self.step, self.scale) 
    
     def forward(self, x: torch.Tensor) : 
         # round bias here 
-        x = x.to(self.weight.device)
         return super().forward(x)
 
 
 # Analog Core Conv Operation: DAC ,  ,  split channels conv ,  quantize ,noise then accumulate 
 class AnalogConv2d(DIANAConv2d): 
-    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, in_channels: int, out_channels: int, kernel_size: int, stride: Tuple[int, ...] = 1, padding: str = 0, dilation: Tuple[int, ...] = 1, array_size : int = 1152):
+    def __init__(self, qrangespec: QRangeSpecType, qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType, in_channels: int, out_channels: int, kernel_size: int, stride: Tuple[int, ...] = 1, padding: str = 0, dilation: Tuple[int, ...] = 1,groups:                   int = 1 ,  array_size : int = 1152):
         
         if isinstance(kernel_size , Tuple): 
             k_size = kernel_size[0] * kernel_size[1] 
@@ -202,15 +194,12 @@ class AnalogConv2d(DIANAConv2d):
             k_size = kernel_size**2 
         self.max_channels = math.floor(array_size/k_size)
         assert self.max_channels >= 1 , f"Array size must be at least kernel_size * kernel_size: {kernel_size**2}"
-        super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels, out_channels, kernel_size, stride, padding, dilation, bias=False)
+        super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels, out_channels, kernel_size, stride, padding, dilation, groups = groups, bias=False)
 
-        self.gain = nn.Parameter(torch.ones(math.ceil(in_channels/self.max_channels)))# Analog domain gain from Vgs 
-        self.gain_enabled = False 
 
 
     def forward(self, x : torch.Tensor) : # returns a five dimensionsal tensor 
-        x.to(self.weight.device) 
-      
+        
         group_count = 1 if self.max_channels >= x.size(1) else math.ceil(x.size(1)/self.max_channels) 
         counter = x.size(1) 
         
@@ -220,7 +209,6 @@ class AnalogConv2d(DIANAConv2d):
             weight = self.qweight
         else:
             weight = self.weight
-    
         min_i =0
         max_i = 0 
         for i in range(group_count): # chance for parallelization across distributed loads 
@@ -229,10 +217,7 @@ class AnalogConv2d(DIANAConv2d):
 
             group_passed = x[: , min_i:max_i , : , : ] 
             pass_weight = weight[: , min_i:max_i , : , : ]
-            if not self.gain_enabled: 
-                conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding) 
-            else: 
-                conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding) * self.gain[i] 
+            conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding , dilation=self.dilation , groups=self.groups) 
             if padded_out is None:            
                 padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
             padded_out[i] = conv_out
@@ -242,16 +227,12 @@ class AnalogConv2d(DIANAConv2d):
                 tile_size = counter # remaining 
         
         return padded_out
-    def enable_gain(self) : 
-        self.gain_enabled = True 
-    def disable_gain(self) : 
-        self.gain_enabled = False 
     def stop_observing(self):
         
         super(DIANAConv2d, self).stop_observing()
         if self.n_levels <= 3: 
-            self.bw_clip_lo = torch.tile(torch.Tensor([-1]) , self.clip_lo.shape).to(self.clip_lo.device)     
-            self.bw_clip_hi = torch.tile(torch.Tensor([1]) , self.clip_hi.shape).to(self.clip_lo.device)  
+            self.register_buffer("bw_clip_lo",torch.tile(torch.Tensor([-1]) , self.clip_lo.shape) )
+            self.register_buffer("bw_clip_hi",  torch.tile(torch.Tensor([1]) , self.clip_hi.shape)) 
         else: 
             self.define_bitwidth_clipping() 
         
@@ -290,11 +271,11 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
         self.sigma = std
   
         if signed: 
-            self.clip_lo = torch.Tensor([-2**(bitwidth-1)])
-            self.clip_hi = -self.clip_lo -1 
+            self.register_buffer("clip_lo", torch.Tensor([-2**(bitwidth-1)]))
+            self.register_buffer("clip_hi" ,  -self.clip_lo -1 )
         else : 
-            self.clip_lo = torch.Tensor([0])
-            self.clip_hi = torch.Tensor([2**bitwidth]) -1 
+            self.register_buffer("clip_lo", torch.Tensor([0]))
+            self.register_buffer("clip_hi", torch.Tensor([2**bitwidth]) -1 ) 
         self.enabled = False  
         
     def enable(self): 
@@ -304,8 +285,6 @@ class AnalogGaussianNoise(nn.Module) : # applying noise to adc out
 
     def forward(self , x : torch.Tensor) : 
         if self.enabled: 
-            self.clip_lo  = self.clip_lo.to(x.device)
-            self.clip_hi  = self.clip_hi.to(x.device)
             x = torch.round(x + self.SNR_i*x*(torch.randn_like(x)  *self.sigma) )
             return torch.clamp(x, self.clip_lo , self.clip_hi ) 
         return x 

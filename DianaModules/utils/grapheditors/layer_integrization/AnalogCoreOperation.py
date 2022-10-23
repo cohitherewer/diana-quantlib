@@ -71,8 +71,8 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
                                 bias=False)
         new_module.weight.data = torch.round(qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
         new_module.register_buffer("is_analog" , torch.Tensor([True])) 
-        new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
-        new_module.gain.data = qconv.gain.data.clone().detach() 
+        #new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
+        #new_module.gain.data = qconv.gain.data.clone().detach() 
         return new_module
         
 
