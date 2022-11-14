@@ -40,7 +40,7 @@ class HWMappingConverter(ComposedEditor) :
             EpsTunnelInserter(),
                
             
-           ResidualAddsAnalogCoreRewriter() ,  
+           ResidualAddsAnalogCoreRewriter() , # Fix this later
            DianaRequantizer()  , 
             
             ]

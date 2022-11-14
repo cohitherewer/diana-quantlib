@@ -9,18 +9,25 @@ from DianaModules.models.cifar10.MobileNet import MobileNetV2
 
 from DianaModules.models.imagenet.Dataset import ImagenetTrainDataset
 from DianaModules.models.imagenet.Resnet import resnet18_imgnet
-from DianaModules.utils.BaseModules import DianaModule 
+from DianaModules.utils.BaseModules import DianaModule
+from DianaModules.utils.serialization.Loader import ModulesLoader
+from DianaModules.utils.serialization.Serializer import ModulesSerializer 
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
-#train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
-#            torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
-train_dataset = ImagenetTrainDataset() 
+train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+#train_dataset = ImagenetTrainDataset() 
 test_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.ToTensor(),torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))] ) )
 train_dataloader = DataLoader(train_dataset , pin_memory=True , num_workers=8 , shuffle=True, batch_size=512)
 val_dataloader = DataLoader(test_dataset)
 train_scale = torch.Tensor([0.03125]) # pow2
-mod = resnet18_imgnet() # CIFAR 10 
+loader = ModulesLoader()
+module_descriptions_pth = "/imec/other/csainfra/nada64/DianaTraining/serialized_models/Mobilenetv2.yaml"
+module_descriptions = loader.load(module_descriptions_pth) 
+mod = MobileNetV2() # CIFAR 10 
 
-model = DianaModule(DianaModule.from_trainedfp_model(mod))
+model = DianaModule(DianaModule.from_trainedfp_model(mod , modules_descriptors=module_descriptions_pth))
+#serializer = ModulesSerializer(model.gmodule)  
+#serializer.dump(module_descriptions_pth) 
 model.attach_train_dataloader(train_dataloader , scale=train_scale)
 model.start_observing() 
 x, _ = train_dataset.__getitem__(0)
@@ -52,9 +59,9 @@ for node in model.gmodule.graph.nodes :
         pass 
 
 
-data_folder = Path("backend/cifar10/resnet18")
+#data_folder = Path("backend/cifar10/resnet18")
 
-model.export_model(str(data_folder.absolute()))
+#model.export_model(str(data_folder.absolute()))
 
 
 

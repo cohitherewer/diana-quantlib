@@ -4,6 +4,7 @@ from abc import abstractmethod
 from cProfile import run
 from collections import OrderedDict
 from math import log2, floor
+from pathlib import Path
 from random import randint
 import sched
 from typing import Any, Dict, List, Union
@@ -31,7 +32,7 @@ import importlib
 import pytorch_lightning as pl 
 import torchmetrics 
 class DianaModule(pl.LightningModule): # Base class for all diana models  
-    def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] ): 
+    def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] =None): 
         super().__init__()
         self.gmodule = graph_module
         self._integrized = False 
@@ -41,6 +42,7 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         self.optimizer = None 
         self.train_acc = torchmetrics.Accuracy()
         self.valid_acc = torchmetrics.Accuracy()
+        self.test_counter =0  
         #self.test_acc = torchmetrics.Accuracy() 
     
     def start_observing(self): #before starting training with FP 
@@ -161,10 +163,17 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
 
         return outputs["loss"]
         
-        
     def test_step(self, batch, batch_idx, *args, **kwargs) : # for quantization
+        
         x , y = batch 
         _ = self.gmodule(x) 
+        self.test_counter += 1
+        if self.test_counter == 5000 : 
+            self.stop_observing() 
+            model_save_path = Path("zoo/imagenet/resnet18/quantized/weights.pth")
+            torch.save ({
+                       'state_dict': self.gmodule.state_dict(),
+                    } , model_save_path)
         pass 
         #x , y = batch  
         #if self._integrized: 
@@ -190,6 +199,7 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
     def validation_step_end(self, outputs) :
         self.valid_acc(outputs["pred"] ,outputs["true"] )
         self.log("val_acc" ,self.valid_acc,  on_epoch=True , prog_bar=True, sync_dist=True)
+        
         return outputs["loss"]
     def set_optimizer(self, type : str = 'SGD' , *args , **kwargs):  # case sensitive 
         my_module = importlib.import_module("torch.optim")
@@ -200,10 +210,10 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
     def configure_optimizers(self):
         
         return {"optimizer":self.optimizer , "lr_scheduler": {"scheduler": self.scheduler ,"monitor": "val_acc"} } 
-    
+
     def initialize_quantization(self , trainer): 
         self.start_observing()
-        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'] ) 
+        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader']) 
         self.stop_observing() 
         for _,module in self.gmodule.named_modules(): 
             if type(module) == DIANAConv2d or isinstance(module, DIANALinear) or (isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity) ):  

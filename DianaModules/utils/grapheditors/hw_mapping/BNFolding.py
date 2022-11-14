@@ -55,11 +55,8 @@ class BNFolderApplier(NNModuleApplier):
         scale = gamma /sigma 
         shift = (-mi * gamma + beta * sigma) / sigma 
         
-        print(module_bn.weight.shape)
-        print(scale.shape) 
         shape =  tuple(1 if i != 0 else mi.numel() for i, _ in enumerate(range(0, len(module_linear.weight.shape))))
         scale = scale.reshape(shape) 
-        print(scale.shape)
         module_linear.weight.data = module_linear.weight.data * scale 
         if module_linear.bias is not None: 
             module_linear.bias.data = module_linear.bias.data  * scale  + shift

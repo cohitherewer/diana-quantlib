@@ -194,12 +194,12 @@ class AnalogConv2d(DIANAConv2d):
             k_size = kernel_size**2 
         self.max_channels = math.floor(array_size/k_size)
         assert self.max_channels >= 1 , f"Array size must be at least kernel_size * kernel_size: {kernel_size**2}"
+        #assert groups ==1 , f"For grouped convolutions, please run on the digital core. "
         super().__init__(qrangespec, qgranularityspec, qhparamsinitstrategyspec, in_channels, out_channels, kernel_size, stride, padding, dilation, groups = groups, bias=False)
 
 
 
     def forward(self, x : torch.Tensor) : # returns a five dimensionsal tensor 
-        
         group_count = 1 if self.max_channels >= x.size(1) else math.ceil(x.size(1)/self.max_channels) 
         counter = x.size(1) 
         
@@ -217,10 +217,11 @@ class AnalogConv2d(DIANAConv2d):
 
             group_passed = x[: , min_i:max_i , : , : ] 
             pass_weight = weight[: , min_i:max_i , : , : ]
+            
             conv_out = nn.functional.conv2d(group_passed , pass_weight  ,stride = self.stride , padding=self.padding , dilation=self.dilation , groups=self.groups) 
             if padded_out is None:            
                 padded_out = torch.zeros(group_count , x.size(0) , self.out_channels , conv_out.size(2) ,conv_out.size(3)).to(self.weight.device)             
-            padded_out[i] = conv_out
+            padded_out[i] = conv_out.clone().to(padded_out.device)
             counter = counter - tile_size 
             min_i = max_i 
             if counter < self.max_channels: 

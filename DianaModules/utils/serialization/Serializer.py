@@ -30,7 +30,7 @@ class ModulesSerializer:
                             qgranspec = 'PER-OUTCHANNEL_WEIGHTS'
                         else : 
                             qgranspec = 'PER-ARRAY' 
-                        descriptor = ModuleDescriptor(node.target , core_choice ,qhparamsinitstrategyspec,qgranspec) 
+                        descriptor = ModuleDescriptor(node.target , core_choice ,qhparamsinitstrategyspec,qgranspec, module.weight.size()) 
                         self.descriptors.append(descriptor)
             except: 
                 pass 
