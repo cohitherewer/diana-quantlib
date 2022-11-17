@@ -35,7 +35,7 @@ model.attach_train_dataloader(train_dataloader, scale = train_scale )
 model.attach_validation_dataloader(val_dataloader,  scale= train_scale) 
 
 # Initializing quantization 
-trainer = pl.Trainer(accelerator='gpu' , devices=[0])  
+#trainer = pl.Trainer(accelerator='gpu' , devices=[0])  
 #
 #trainer.test(model , train_dataloader)
 model.start_observing() 

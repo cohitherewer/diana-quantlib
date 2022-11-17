@@ -26,6 +26,7 @@ checker = (lambda m : True if type(m) != AnalogOutIdentity else False, )
 roles = Roles([
 
     ('eps_in',  Candidates([
+        ('',     None),  
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
     ])),
     ('accumulator',  Candidates([
@@ -65,16 +66,18 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
 
         # get handles on matched `fx.Node`s
         name_to_match_node = self.pattern.name_to_match_node(nodes_map=ap)
-        node_eps_in     = name_to_match_node['eps_in']
+        
         node_bn         = name_to_match_node['bn'] if 'bn' in name_to_match_node.keys() else None
         node_acc         = name_to_match_node['accumulator'] if 'accumulator' in name_to_match_node.keys() else None
         node_activation = name_to_match_node['activation']
+
+        node_eps_in     = name_to_match_node['eps_in'] if 'eps_in' in name_to_match_node.keys() else [p for p in node_activation.all_input_nodes][0] #if eps in isint there then accumulator isint there so it's safe to use the input to activation
         
         node_eps_out    = name_to_match_node['eps_out']
         
         # get handles on matched `nn.Module`s
         name_to_match_module = self.pattern.name_to_match_module(nodes_map=ap, data_gm=g)
-        module_eps_in     = name_to_match_module['eps_in']
+        module_eps_in     = name_to_match_module['eps_in'] if 'eps_in' in name_to_match_module.keys() else None
         module_bn         = name_to_match_module['bn'] if 'bn' in name_to_match_module.keys() else None
         module_activation = name_to_match_module['activation']
       
@@ -84,7 +87,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         assert ((node_bn is None) and (module_bn is None)) or (isinstance(node_bn, fx.Node) and isinstance(module_bn, nn.Module))
 
         # extract the parameters required to compute the requantiser's parameters
-        eps_in  = module_eps_in.eps_out
+        eps_in  = module_eps_in.eps_out if module_eps_in else torch.Tensor([1])
         mi      = module_bn.running_mean if module_bn is not None else torch.zeros_like(eps_in)
         sigma   = torch.sqrt(module_bn.running_var + module_bn.eps) if module_bn is not None else torch.ones_like(eps_in)
         gamma   = module_bn.weight if module_bn is not None else torch.ones_like(eps_in)
@@ -182,9 +185,10 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         else: 
             with g.graph.inserting_after(node_eps_in):
                 new_node = g.graph.call_module(new_target, args=(node_eps_in,))
+            
         node_eps_out.replace_input_with(node_activation, new_node)
-
-        module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
+        if module_eps_in: 
+            module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
         module_eps_out.set_eps_in(torch.ones_like(module_eps_out.eps_in))
 
         # ...and delete the old construct

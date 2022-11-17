@@ -27,7 +27,7 @@ class AnalogFeatureExtractor: # Linear layers followed by identities
                         if(isinstance(user_mod, Requantisation)): 
                             break 
                     #print(user_mod)
-                    self.model_input_output.append({node.target:{"scale": user_mod.div}}) 
+                    self.model_input_output.append({node.target:{"scale": user_mod.div,"weight": module.weight}}) 
                     pred_mod.register_forward_hook(self._out_hook(node.target, len(self.model_input_output)-1 , "input"))
                     user_mod.register_forward_hook(self._out_hook(node.target, len(self.model_input_output)-1 , "output"))
                     
@@ -49,15 +49,21 @@ class AnalogFeatureExtractor: # Linear layers followed by identities
                 input = e[layer_name]["input"]
                 output = e[layer_name]["output"]
                 scale = e[layer_name]["scale"]
+                weight = e[layer_name]["weight"]
                 file.write(f"NAME:{layer_name}\n")
                 file.write(f"SCALE:{scale}\n")
                 file.write(f"IN_SHAPE:{input.size()}\n")
                 file.write(f"OUT_SHAPE:{output.size()}\n")
+                file.write(f"WEIGHT_SHAPE:{weight.size()}\n")
+
                 file.write("INPUT\n")
                 for c in input.flatten():  # NCHW format
                     file.write(f"{int(c)}\n")
                 file.write("OUTPUT\n")
                 for c in output.flatten():  # NCHW format
+                    file.write(f"{int(c)}\n")
+                file.write("WEIGHT\n")
+                for c in weight.flatten():  # NCHW format
                     file.write(f"{int(c)}\n")
         
         

@@ -42,7 +42,6 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         self.optimizer = None 
         self.train_acc = torchmetrics.Accuracy()
         self.valid_acc = torchmetrics.Accuracy()
-        self.test_counter =0  
         #self.test_acc = torchmetrics.Accuracy() 
     
     def start_observing(self): #before starting training with FP 
@@ -80,7 +79,7 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         # `AddTreeHarmoniser` argument
         addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'minmax', 'DIANA'  )  
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
-
+       
         converter  =  F2FConverter(
             modulewisedescriptionspec,
             addtreeqdescriptionspec,
@@ -167,22 +166,7 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         
         x , y = batch 
         _ = self.gmodule(x) 
-        self.test_counter += 1
-        if self.test_counter == 5000 : 
-            self.stop_observing() 
-            model_save_path = Path("zoo/imagenet/resnet18/quantized/weights.pth")
-            torch.save ({
-                       'state_dict': self.gmodule.state_dict(),
-                    } , model_save_path)
-        pass 
-        #x , y = batch  
-        #if self._integrized: 
-        #    x = torch.floor(x / self.train_scale) 
-        #yhat = self.gmodule(x)
-        #loss = nn.CrossEntropyLoss()(yhat , y)
-        #self.test_acc(yhat , y) 
-        #self.log("test_loss", loss)
-        #self.log("test_acc" , self.test_acc, on_step=True, prog_bar=True) 
+     
     def validation_step(self, batch, batch_idx, *args, **kwargs) :
         x , y = batch  
         if self._integrized: 

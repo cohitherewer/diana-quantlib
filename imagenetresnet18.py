@@ -85,7 +85,7 @@ print("testing fp")
 print("STARTING FQ")
 resnet18_diana = DianaModule(DianaModule.from_trainedfp_model(fp.gmodule, modules_descriptors=module_descriptions) ) 
 print("FINISHED FQ")
-resnet18_diana.attach_quantization_dataloader(train_dataloader) 
+resnet18_diana.attach_quantization_dataloader(quant_dataloader) 
 resnet18_diana.attach_train_dataloader(train_dataloader)
 resnet18_diana.attach_validation_dataloader(validation_dataloader) 
 serializer = ModulesSerializer(resnet18_diana.gmodule)  
@@ -105,15 +105,16 @@ model_save_path = Path("zoo/imagenet/resnet18/quantized/weights.pth")
 torch.save ({
                        'state_dict': resnet18_diana.gmodule.state_dict(),
                     } , model_save_path)
-resnet18_diana.freeze_clipping_bound() 
 print("quant init finished ")
+resnet18_diana.freeze_clipping_bound() 
+
 #training 
 checkpoint_callback = ModelCheckpoint(monitor = "val_acc" ,mode="max",  dirpath='zoo/imagenet/resnet18/FQ/',filename='imgnet-{epoch:02d}-{val_acc:.4f}' ,save_top_k=1, save_on_train_epoch_end=False  )
 callbacks = [checkpoint_callback,EarlyStopping(monitor="val_acc", mode="max", patience=10) ]
 max_epochs = 60
 trainer = pl.Trainer(accelerator = "gpu",strategy="ddp",  devices = -1 , max_epochs =max_epochs , callbacks=callbacks,logger=CSVLogger(save_dir="logs/FQfrozen"))
 print("starting FQ training") 
-resnet18_diana.set_optimizer('SGD' , lr=0.001 ,    weight_decay=1e-5)
+resnet18_diana.set_optimizer('SGD' , lr=0.00001 ,    weight_decay=1e-5)
 #resnet18_diana.load_state_dict(torch.load("zoo/imagenet/resnet18/FQ/imgnet-epoch=07-val_acc=0.4658.ckpt")["state_dict"]) 
 trainer.fit(resnet18_diana , train_dataloader , validation_dataloader)
 

@@ -35,10 +35,10 @@ class ResidualAddsAnalogCoreFinder(Finder): # only looks for residual add patter
 
                         bn_candidate_0 = [p for p in [p for p in predecessors[0].all_input_nodes][0].all_input_nodes][0]
                         bn_candidate_1 = [p for p in [p for p in predecessors[1].all_input_nodes][0].all_input_nodes][0]
-
-                        if isinstance(g.get_submodule(bn_candidate_0.target)   , nn.BatchNorm2d) : 
+                         
+                        if len([u for u in bn_candidate_0.users])==1 and isinstance(g.get_submodule(bn_candidate_0.target)   , nn.BatchNorm2d) : 
                             aps.append(DianaAps('bn_0' , n)) 
-                        elif isinstance(g.get_submodule(bn_candidate_1 .target) , nn.BatchNorm2d) :  
+                        elif len([u for u in bn_candidate_1.users])==1 and isinstance(g.get_submodule(bn_candidate_1 .target) , nn.BatchNorm2d) :  
                             aps.append(DianaAps('bn_1' , n)) 
 
 
@@ -89,6 +89,7 @@ class ResidualAddsAnalogCoreApplier(Applier):
         nodes_bn_predecessors = [p for p in node_bn.all_input_nodes] 
         nodes_bn_users = [u for u in node_bn.users]  
         assert(len(nodes_bn_users) == 1)
+
         eps_in = torch.Tensor([1]) 
         assert len(nodes_bn_predecessors) == 1
         try: 

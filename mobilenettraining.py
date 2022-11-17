@@ -26,6 +26,7 @@ module_descriptions = loader.load(module_descriptions_pth)
 mod = MobileNetV2() # CIFAR 10 
 
 model = DianaModule(DianaModule.from_trainedfp_model(mod , modules_descriptors=module_descriptions_pth))
+
 #serializer = ModulesSerializer(model.gmodule)  
 #serializer.dump(module_descriptions_pth) 
 model.attach_train_dataloader(train_dataloader , scale=train_scale)
@@ -37,9 +38,7 @@ model.stop_observing()
 print("FQ converted")
 model.map_to_hw() 
 print("HW mapped ") 
-for _ , mod in model.gmodule.named_modules(): 
-    if isinstance(mod , _QModule): 
-        print(mod)
+
 model.integrize_layers() 
 print("layer integrize ")
 for node in model.gmodule.graph.nodes : 
