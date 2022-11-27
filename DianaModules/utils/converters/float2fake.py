@@ -3,7 +3,7 @@ r""" Converts regular torch neural networko to a fake-quantized model  """
 
 from typing import List, Tuple
 
-from DianaModules.utils.grapheditors.fake_quantization.ActFuser import DianaQuantizerFuser
+from DianaModules.utils.grapheditors.fake_quantization.ActFuser import DianaQuantizerFuser , DianaBranchFuser
 from DianaModules.utils.grapheditors.fake_quantization.AnalogConv import AnalogConvMapper
 from DianaModules.utils.grapheditors.fake_quantization.Interposer import DianaF2FInterposer
 
@@ -82,6 +82,7 @@ class F2FQuantiser(ComposedEditor):
             ),
             QuantLibRetracer()  ,
            DianaQuantizerFuser() ,# ignore the harmonise adds 
+           DianaBranchFuser()
            ]
        
         super(F2FQuantiser, self).__init__(

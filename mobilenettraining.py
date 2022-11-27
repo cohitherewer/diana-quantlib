@@ -36,19 +36,9 @@ x = x.unsqueeze(0)
 _ = model(x)  
 model.stop_observing() 
 print("FQ converted")
-model.map_to_hw() 
-print("HW mapped ") 
-
-model.integrize_layers() 
-print("layer integrize ")
 for node in model.gmodule.graph.nodes : 
     try: 
-        if (isinstance(model.gmodule.get_submodule(node.target), _QModule)): 
-            users = [u for u in node.users]
-            pred = [p for p in node.all_input_nodes]
-
-            print(f"Qmodule Node: {node} has the users: ", *users, " and pred: ", *pred) 
-        elif (isinstance(model.gmodule.get_submodule(node.target), nn.BatchNorm2d)): 
+        if (isinstance(model.gmodule.get_submodule(node.target), nn.BatchNorm2d)): 
             users = [u for u in node.users]
             pred = [p for p in node.all_input_nodes]
 
@@ -56,6 +46,21 @@ for node in model.gmodule.graph.nodes :
         pass 
     except : 
         pass 
+model.map_to_hw() 
+print("HW mapped ") 
+for node in model.gmodule.graph.nodes : 
+    try: 
+        if (isinstance(model.gmodule.get_submodule(node.target), nn.BatchNorm2d)): 
+            users = [u for u in node.users]
+            pred = [p for p in node.all_input_nodes]
+
+            print(f"BN Node: {node} has the users: ", *users, " and pred: ", *pred) 
+        pass 
+    except : 
+        pass 
+model.integrize_layers() 
+print("layer integrize ")
+
 
 
 #data_folder = Path("backend/cifar10/resnet18")
