@@ -21,11 +21,11 @@ class LayerIntegrizationConverter(ComposedEditor) :
    
             
         AnalogConvIntegrizer(),
-        DianaLinearOpIntegrizer() , #problem is hereee
-        AnalogOutRequantizer() ,
-            
-       EpsTunnelConstructSimplifier() ,
-       EpsTunnelRemover()
+       # DianaLinearOpIntegrizer() , #problem is hereee
+        #AnalogOutRequantizer() ,
+       #     
+       #EpsTunnelConstructSimplifier() ,
+       #EpsTunnelRemover()
           ]) 
     def apply(self, g: fx.GraphModule, *args, **kwargs) -> fx.GraphModule:
         for editor in self._children_editors:

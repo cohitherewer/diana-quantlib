@@ -127,7 +127,7 @@ class DianaBranchFuserApplier(Applier) :
         # find module with the lowest n_levels ,clip_lo, clip_hi
         lowest_index ,clip_lo,clip_hi = min_n(act_mods)
         removed_nodes= [act for i ,act in enumerate(acts) if i!=lowest_index]
-        print(f"Lowest index: {lowest_index} , len of acts: {len(acts)} , len of modules: {len(act_mods)}")
+        #print(f"Lowest index: {lowest_index} , len of acts: {len(acts)} , len of modules: {len(act_mods)}")
         main_node = acts[lowest_index]
         main_mod = act_mods[lowest_index]    
         # clip main module to the clipping of lowest found activation 

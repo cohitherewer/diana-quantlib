@@ -40,7 +40,6 @@ analog_roles  = Roles([
         ('Requant', NNModuleDescription(class_=DIANAIdentity, kwargs={'qrangespec':'ternary' , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd' })),
     ])),
      ('eps_identity_out', Candidates([
-         ('',     None),  
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs= {'eps': torch.Tensor([1.0])})),
     ])),
      ('noise', Candidates([
@@ -54,7 +53,7 @@ analog_roles  = Roles([
         ('Accumulator', NNModuleDescription(class_=AnalogAccumulator, kwargs={})),
     ]))
 ])
-
+# The layer integrization values cannot an accurate representation of what the actual result is, because the preservation of order of operations is not the same when removing the analog accumulator (not taking into account partial sums) so the accuracy of integrized model isin't relevant
 class AnalogConvIntegrizerApplier(NNModuleApplier) : 
     def __init__(self, pattern: NNModulePattern):
         super().__init__(pattern)
@@ -70,9 +69,10 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
                                 groups=qconv.groups,
                                 bias=False)
         new_module.weight.data = torch.round(qconv.qweight.data.clone().detach()  / qconv.scale.data.clone().detach()) # fake quantized / scale = true quantized
+        #new_module.weight.data = qconv.qweight.data.clone().detach()  # fake quantized / scale = true quantized
+        
         new_module.register_buffer("is_analog" , torch.Tensor([True])) 
-        #new_module.register_buffer("gain", torch.zeros(qconv.gain.size(0)) )# tensor of gain values to be loaded into analog core 
-        #new_module.gain.data = qconv.gain.data.clone().detach() 
+        
         return new_module
         
 
@@ -82,6 +82,7 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         node_eps_in  = name_to_match_node['eps_in']
         node_conv  = name_to_match_node['conv']
         node_conv_out = name_to_match_node['eps_conv_out']
+        node_identity_out = name_to_match_node["eps_identity_out"]
         node_noise= name_to_match_node['noise']
         node_noise_out= name_to_match_node['eps_noise_out'] if 'eps_noise_out' in name_to_match_node.keys() else None # 
         node_accumulator  = name_to_match_node['accumulator']
@@ -91,31 +92,28 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         name_to_match_module = self.pattern.name_to_match_module(nodes_map=ap, data_gm=g)
         module_eps_in  = name_to_match_module['eps_in']
         module_conv  = name_to_match_module['conv']
-        module_conv_out = name_to_match_module['eps_conv_out']
-      
-      
-       
+        module_conv_out = name_to_match_module["eps_conv_out"]
+        
          # create the integerised linear operation
         new_target = id_
         new_module = AnalogConvIntegrizerApplier.create_torch_module(module_conv)
   
         # add the requantised linear operation to the graph...
-        g.add_submodule(new_target, new_module)
         
+        g.add_submodule(new_target, new_module)
         with g.graph.inserting_after(node_eps_in):
             new_node = g.graph.call_module(new_target, args=(node_eps_in,))
         node_conv_out.replace_input_with(node_conv, new_node)
-        acc_users = [u for u in node_accumulator.users] 
-        for u in acc_users: 
-            if node_noise_out is not None: 
-                u.replace_input_with(node_accumulator , node_noise_out)
-            else: 
-                u.replace_input_with(node_accumulator , node_noise)
-
-         # .and delete conv and accumulator opertions , set epstunnels of eps_identity_out eps_out to 1 and eps_out eps_in to 1
-        module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
         module_conv_out.set_eps_in(torch.ones_like(module_conv_out.eps_in))
-        # noise  
+        module_eps_in.set_eps_out(torch.ones_like(module_eps_in.eps_out))
+
+        node_accumulator.replace_all_uses_with(node_noise_out)
+        node_noise.replace_all_uses_with(node_identity_out)
+        
+       
+            
+       
+        
         # noise prop 
          # ...and delete the old operation
         g.delete_submodule(node_conv.target)
@@ -123,6 +121,8 @@ class AnalogConvIntegrizerApplier(NNModuleApplier) :
         g.delete_submodule(node_accumulator.target)
         g.graph.erase_node(node_accumulator)
 
+        
+        
        
         return g
 
@@ -140,5 +140,4 @@ class AnalogConvIntegrizer(ComposedEditor):
             editors.append(class_())
         super().__init__(editors)
     pass 
-#endregion
-   
+ 

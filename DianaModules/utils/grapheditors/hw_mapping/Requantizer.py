@@ -60,6 +60,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         super(DianaRequantizerApplier, self).__init__(pattern)
         self.div_max_bitwidth = torch.Tensor([2 ** 15])  # the requantisation factor
         self.bn_bitwidth =torch.Tensor([2**8]) 
+        self.counter = 0 
     
 
     def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
@@ -107,7 +108,8 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
         #beta_int  = torch.floor(self.D * (-mi * gamma + beta * sigma) / (sigma * eps_out))
 
         # create the requantiser
-        new_target = id_ + f"[{randint(0, 10000) }]"
+        new_target = id_ #+ f"[{self.counter}]"
+        #self.counter += 1 
         if module_bn is None: 
             
             gamma_int = torch.floor( self.div_max_bitwidth *eps_in             / ( eps_out))# mul then div by self.D b

@@ -32,7 +32,7 @@ import importlib
 import pytorch_lightning as pl 
 import torchmetrics 
 class DianaModule(pl.LightningModule): # Base class for all diana models  
-    def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ] =None): 
+    def __init__(self,graph_module: Union[nn.Module, fx.graph_module.GraphModule ]=None, criterion= nn.CrossEntropyLoss()): 
         super().__init__()
         self.gmodule = graph_module
         self._integrized = False 
@@ -43,16 +43,16 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         self.train_acc = torchmetrics.Accuracy()
         self.valid_acc = torchmetrics.Accuracy()
         #self.test_acc = torchmetrics.Accuracy() 
+        self.criterion = criterion
     
-    def start_observing(self): #before starting training with FP 
-        for _ ,module in self.gmodule.named_modules():
-            if isinstance(module,( _QModule,HarmonisedAdd)) : 
-               
+    def start_observing(self , is_modules = (_QModule, HarmonisedAdd), not_modules = type(None)): #before starting training with FP 
+        for _ ,module in self.gmodule.named_modules(): 
+            if isinstance(module,is_modules) and not isinstance(module ,not_modules) : 
                 module.start_observing()
 
-    def stop_observing(self): # before starting training with fake quantised network  
+    def stop_observing(self, is_modules = (_QModule, HarmonisedAdd), not_modules = type(None)): # before starting training with fake quantised network  
         for _ ,module in self.gmodule.named_modules():
-            if isinstance(module,(_QModule, HarmonisedAdd) ) : 
+            if isinstance(module,is_modules) and not isinstance(module , not_modules): 
                 module.stop_observing()
    
     def forward(self, x : torch.Tensor) : 
@@ -69,15 +69,15 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
     @classmethod 
     def from_trainedfp_model(cls, model: nn.Module , modules_descriptors  = None): # returns fake quantized model from_ floating point quantised model 
         modulewisedescriptionspec = ( # change const later
-            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'minmax','DIANA')), 
-            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} ,'minmax' , 'DIANA')), # upper clip is updated during training
-            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'minmax','DIANA')), # can use per-outchannel_weights here 
-            ({'types': ( 'Linear' )}, ('per-outchannel_weights', {'bitwidth': 8, 'signed': True},  'minmax','DIANA')),
+            ({'types': ('Identity')},                             ('per-array',  {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), 
+            ({'types': ('ReLU')} , ('per-array' , {'bitwidth': 7, 'signed': False} ,'meanstd' , 'DIANA')), # upper clip is updated during training
+            ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here 
+            ({'types': ( 'Linear' )}, ('per-outchannel_weights', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
-        analogcoredescriptionspec =  ('per-array', 'ternary' , 'minmax' )
+        analogcoredescriptionspec =  ('per-array', 'ternary' , 'meanstd' )
             
         # `AddTreeHarmoniser` argument
-        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'minmax', 'DIANA'  )  
+        addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA'  )  
         graph = qg.fx.quantlib_symbolic_trace(root=model) # graph module 
        
         converter  =  F2FConverter(
@@ -111,6 +111,7 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         x, _ = self.train_dataloader['dataloader'].dataset.__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
+        x.to("cpu")
         with torch.no_grad(): 
             self.gmodule = converter(self.gmodule, {'x': {'shape': x.shape, 'scale':self.train_dataloader['scale']}})
         self._integrized = True
@@ -149,9 +150,9 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
     def training_step(self, batch, batch_idx, *args, **kwargs) :
         x , y = batch  
         if self._integrized: 
-            x = torch.floor(x / self.train_scale) 
+            x = torch.floor(x / self.train_dataloader["scale"].to(x.device))  
         yhat = self.gmodule(x)
-        loss = nn.CrossEntropyLoss()(yhat , y)
+        loss = self.criterion(yhat , y)
         self.log("train_loss", loss , prog_bar=True)
         # acc 
         return {"loss": loss, "pred":yhat, "true":y}
@@ -169,11 +170,11 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
      
     def validation_step(self, batch, batch_idx, *args, **kwargs) :
         x , y = batch  
-        if self._integrized: 
-            x = torch.floor(x / self.train_scale) 
+        #if self._integrized: 
+        #    x = torch.floor(x / self.train_dataloader["scale"].to(x.device)) 
         yhat = self.gmodule(x)
 
-        loss = nn.CrossEntropyLoss()(yhat , y)
+        loss = self.criterion(yhat , y)
         
         
         
@@ -202,31 +203,27 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         for _,module in self.gmodule.named_modules(): 
             if type(module) == DIANAConv2d or isinstance(module, DIANALinear) or (isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity) ):  
                 module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-
+    def initialize_quantization_activations(self, trainer): 
+        self.start_observing(_QActivation)
+        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'])  
+        self.stop_observing(_QActivation)
     def initialize_quantization_layers(self, trainer): 
-        for _ , mod in self.gmodule.named_modules() : 
-            if isinstance(mod, _QModule) and not isinstance(mod, _QActivation): 
-                mod.start_observing()
-        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'] ) 
-        for _ , mod in self.gmodule.named_modules() : 
-            if isinstance(mod, _QModule) and not isinstance(mod, _QActivation): 
-                mod.stop_observing()
-        for _,module in self.gmodule.named_modules(): 
-            if type(module) == DIANAConv2d or isinstance(module, DIANALinear):  
-                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-    def initialize_quantization_activations(self , trainer): 
-        for _ , mod in self.gmodule.named_modules() : 
-            if isinstance(mod, _QActivation): 
-                mod.start_observing()
-        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'] ) 
-        for _ , mod in self.gmodule.named_modules() : 
-            if isinstance(mod, _QActivation): 
-                mod.stop_observing()
-        for _,module in self.gmodule.named_modules(): 
-            if(isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity) ):  
-                module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-    pass 
-    
+        self.start_observing(not_modules=_QActivation)
+        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader']) 
+        self.stop_observing(not_modules=_QActivation)
+    def set_quantized(self, activations=True):   
+        x ,_ = self.train_dataloader["dataloader"].dataset.__getitem__(0) 
+        if len(x.shape <4): 
+            x = x.unsqueeze(0) 
+        if activations: 
+            self.start_observing()
+        else: 
+            self.start_observing(not_modules=_QActivation)
+        _ = self.gmodule(x) 
+        if activations: 
+            self.stop_observing()
+        else: 
+            self.stop_observing(not_modules=_QActivation)
     @classmethod
     def return_DFS (cls,  node : fx.node.Node,  depth : int)  :
         ls : List[fx.node.Nodes] = [] 

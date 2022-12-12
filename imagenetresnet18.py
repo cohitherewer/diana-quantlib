@@ -55,7 +55,7 @@ imagenet_scale = torch.Tensor([0.03125 ]) #closest pow2 (floor)
 fp_model = resnet18_imgnet()
 fp_model.eval() 
 module_descriptions_pth = "/imec/other/csainfra/nada64/DianaTraining/serialized_models/resnet18.yaml"
-#region ModuleLoader
+
 loader = ModulesLoader()
 module_descriptions = loader.load(module_descriptions_pth) 
 
