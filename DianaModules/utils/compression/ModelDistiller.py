@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
-
+from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR, ReduceLROnPlateau
+import torchmetrics  
 # * Knowledge Distillation
 # * Note: error from teach and true prediction are combined
 
@@ -19,6 +19,7 @@ class OptimizerType(Enum):
 class LrScheduler(Enum):
     COSINE = auto()
     MULTISTEP = auto()
+    EXP = auto()
     NONE = auto()
 
 
@@ -57,11 +58,11 @@ class QModelDistiller(pl.LightningModule):
         for p in teacher.parameters():
             p.requires_grad = False
 
-        self.criterion = DistilLoss(0.5, 1)
+        self.criterion = DistilLoss(0.5, 1.0)
 
-        self.train_acc = pl.metrics.Accuracy()
-        self.valid_acc = pl.metrics.Accuracy()
-        self.test_acc = pl.metrics.Accuracy()
+        self.train_acc = torchmetrics.Accuracy()
+        self.valid_acc = torchmetrics.Accuracy()
+        self.test_acc  = torchmetrics.Accuracy()
 
     def forward(self, x):
         return self.student(x)
@@ -96,29 +97,32 @@ class QModelDistiller(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         self.teacher.eval()  # validation/train switch can set teacher to train
         x, y = batch
-        y_hat = self(x)
-        self.train_acc(nnf.softmax(y_hat, dim=-1), y)
+        y_comp = self.student(x)
         with torch.no_grad():
             teacher_y = self.teacher(x)
-        y_hat = (y_hat, teacher_y)
+        y_hat = (y_comp, teacher_y)
 
         loss = self.criterion(y_hat, y)
+        self.log("train_loss", loss , prog_bar=True)
+        # acc 
+        return {"loss": loss, "pred":y_comp, "true":y}
 
-        self.log('train_acc', self.train_acc)
-        self.log('train_loss', loss)
-
-        return loss
+    def training_step_end(self, outputs) :
+        self.train_acc(outputs["pred"] ,outputs["true"] )
+        self.log("train_acc" , self.train_acc ,on_step=False,  on_epoch=True, prog_bar=True, sync_dist=True)
+        return outputs["loss"]
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self(x)
+        y_hat = self.student(x)
         loss = nnf.cross_entropy(y_hat, y)
 
-        self.log('val_loss', loss)
-        self.valid_acc(nnf.softmax(y_hat, dim=-1), y)
-        self.log('val_acc', self.valid_acc, on_step=True, on_epoch=True)
-
-        return loss
+        self.log("val_loss", loss , prog_bar=True ,sync_dist=True)
+        return {"loss": loss, "pred":y_hat, "true":y}
+    def validation_step_end(self, outputs) :
+        self.valid_acc(outputs["pred"] ,outputs["true"] )
+        self.log("val_acc" ,self.valid_acc, on_step=False,  on_epoch=True , prog_bar=True, sync_dist=True)
+        return outputs["loss"]
 
     def load_weights(self, weights_file: str):
         self.student.load_state_dict(torch.load(weights_file), strict=False)
@@ -162,13 +166,18 @@ class QModelDistiller(pl.LightningModule):
             )]
         else:
             raise RuntimeError(f"Unsupported Optimizer type: {self.hparams.optimizer}")
-
+        
         if sched_type is LrScheduler.COSINE:
             schedulers = [CosineAnnealingLR(opts[-1], T_max=self.hparams.max_epochs, eta_min=0.)]
         elif sched_type is LrScheduler.MULTISTEP:
             # decay lr at 30%, 60% and 80%
             milestones = [int(r * self.hparams.max_epochs) for r in (0.3, 0.6, 0.8)]
             schedulers = [MultiStepLR(opts[-1], milestones=milestones, gamma=self.hparams.gamma)]
+        elif sched_type is LrScheduler.EXP: 
+            # Patience of 5 and a factor of 0.1
+            schedulers = [ReduceLROnPlateau(opts[-1] , mode='max',patience=5)] 
+            return {"optimizer": opts[0] ,"lr_scheduler": schedulers[0], "monitor": 'val_acc'} 
+            pass 
         else:
             schedulers = []
 

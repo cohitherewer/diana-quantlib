@@ -1,16 +1,14 @@
-filename = "zoo/cifar10/resnet20/FQ-epoch=01-val_acc=0.9869.ckpt" 
-from DianaModules.core.Operations import AnalogConv2d
 from DianaModules.utils.BaseModules import DianaModule
 from DianaModules.models.cifar10.LargeResnet import resnet20
 import pytorch_lightning as pl
-import torch
-from DianaModules.utils.compression.QuantStepper import QuantDownStepper 
+import torch 
 from DianaModules.utils.serialization.Loader import ModulesLoader  
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.datasets as ds
 cfg_path = "serialized_models/resnet20.yaml" 
 fp_path  = "zoo/cifar10/resnet20/FP_weights.pth"
+out_path = "zoo/cifar10/resnet20/quantized_8b.pth"
 #define dataset 
 train_dataset =  ds.CIFAR10('./data/cifar10/train', train =True ,download=False, transform=torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.RandomCrop(32, 4),torchvision.transforms.ToTensor() ,torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
@@ -29,33 +27,17 @@ module = resnet20()
 module.load_state_dict(DianaModule.remove_dict_prefix(torch.load(fp_path, map_location="cpu")["state_dict"])) 
 module.eval() 
 
+#trainer.validate(DianaModule(module) ,val_dataloader)
 
 # edit the from_trainedfp_model function to change the intitial quantization parameters 
 model = DianaModule(DianaModule.from_trainedfp_model(module , modules_descriptors=descriptions))
-model.attach_train_dataloader(train_dataloader, torch.Tensor([0.03125])) 
-model.attach_quantization_dataloader(train_dataloader) 
-model.set_quantized(activations=False) 
-model.gmodule.load_state_dict(DianaModule.remove_prefixes(torch.load(filename, map_location="cpu")["state_dict"]))  
-stepper = QuantDownStepper(model, 6 , initial_quant={"bitwidth": 8, "signed" :True}, target_quant="ternary") 
-# View weights information before and weights information after (Before and after ternary)
-# Before 
-for i in range(6+1) : 
-    for _ , mod in model.named_modules(): 
-        if (isinstance(mod, AnalogConv2d)) :  
-            #info about fp weights
-            mean = torch.mean(mod.weight)
-            var  = torch.var(mod.weight)
-            max  = torch.max(mod.weight)
-            min  = torch.min(mod.weight)
-            print(f"At {8-i} Bits, floating point information: \n mean: {mean} \n var: {var} \n max: {max} \n min: {min}")
-            #info about true quantized weights 
-            mean = torch.mean(mod.qweight/mod.scale)
-            var  = torch.var (mod.qweight/mod.scale)
-            max  = torch.max (mod.qweight/mod.scale)
-            min  = torch.min (mod.qweight/mod.scale)
-            print(f"At {8-i} Bits, true-quantized information: \n mean: {mean} \n var: {var} \n max: {max} \n min: {min}")
-            break 
-    print(f"Testing {8-i} bits acc")
-    trainer.validate(model ,val_dataloader)
-    model.set_quantized(False)  # Re determine the thresholds
-    stepper.step() 
+model.initialize_quantization_layers(trainer, train_dataloader)
+
+torch.save ({
+                       'state_dict': model.gmodule.state_dict(),
+                    } , out_path)
+
+# python init trainer: 
+# python trainer.py --lr 0.01 --weight_decay 5e-4 --batch_size 256 --num_workers 8 --num_epochs 20 --scale 0.03125 --quant_steps 0 --config_pth ./serialized_models/resnet20.yaml --stage fq --fp_pth ./zoo/cifar10/resnet20/ResNet_FPweights.pth --quantized_pth ./zoo/cifar10/resenet20/quantized.pth --checkpoint_dir ./zoo/cifar10/resnet20
+# using distiller 
+# python trainer.py --lr 0.001 --weight_decay 5e-5 --batch_size 256 --num_workers 8 --num_epochs 20 --scale 0.03125 --quant_steps 2 --config_pth ./serialized_models/resnet20.yaml --stage fq --fp_pth ./zoo/cifar10/resnet20/FP_weights.pth --quantized_pth ./zoo/cifar10/resnet20/quantized_8b.pth --checkpoint_dir ./zoo/cifar10/resnet20

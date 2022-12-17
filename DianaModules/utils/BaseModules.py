@@ -74,7 +74,11 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
             ({'types': ( 'Conv2d' )}, ('per-outchannel_weights',{'bitwidth': 8, 'signed': True},  'meanstd','DIANA')), # can use per-outchannel_weights here 
             ({'types': ( 'Linear' )}, ('per-outchannel_weights', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
-        analogcoredescriptionspec =  ('per-array', 'ternary' , 'meanstd' )
+        # Edit the following line if you want to use the quant stepper 
+        #analogcoredescriptionspec =  ('per-array', 'ternary' , 'meanstd' ) 
+        analogcoredescriptionspec =  ('per-array', {'bitwidth': 8 , 'signed': True} , 'meanstd' )  
+        #analogcoredescriptionspec =  ('per-array', {'bitwidth': 3 , 'signed': True} , 'meanstd' )  
+
             
         # `AddTreeHarmoniser` argument
         addtreeqdescriptionspec = ('per-array', {'bitwidth': 8, 'signed': True}, 'meanstd', 'DIANA'  )  
@@ -193,27 +197,27 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
         self.scheduler  = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer , mode='max',patience=5)
     
     def configure_optimizers(self):
-        
+        self.set_optimizer("SGD" ,lr=0.01)
         return {"optimizer":self.optimizer , "lr_scheduler": {"scheduler": self.scheduler ,"monitor": "val_acc"} } 
 
-    def initialize_quantization(self , trainer): 
+    def initialize_quantization(self , trainer,dataloader): 
         self.start_observing()
-        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader']) 
+        trainer.test(model=self , dataloaders=dataloader) 
         self.stop_observing() 
         for _,module in self.gmodule.named_modules(): 
             if type(module) == DIANAConv2d or isinstance(module, DIANALinear) or (isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity) ):  
                 module.scale = torch.Tensor(torch.exp2(torch.round(torch.log2(module.scale))) )     
-    def initialize_quantization_activations(self, trainer): 
+    def initialize_quantization_activations(self, trainer, dataloader): 
         self.start_observing(_QActivation)
-        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader'])  
+        trainer.test(model=self , dataloaders=dataloader)  
         self.stop_observing(_QActivation)
-    def initialize_quantization_layers(self, trainer): 
+    def initialize_quantization_layers(self, trainer, dataloader): 
         self.start_observing(not_modules=_QActivation)
-        trainer.test(model=self , dataloaders=self.quant_dataloader['dataloader']) 
+        trainer.test(model=self , dataloaders=dataloader) 
         self.stop_observing(not_modules=_QActivation)
-    def set_quantized(self, activations=True):   
+    def set_quantized(self, activations=True):    
         x ,_ = self.train_dataloader["dataloader"].dataset.__getitem__(0) 
-        if len(x.shape <4): 
+        if len(x.size()) <4: 
             x = x.unsqueeze(0) 
         if activations: 
             self.start_observing()
@@ -236,11 +240,27 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
             n = users[0]
         return ls
     @classmethod
-    def remove_data_parallel(cls,old_state_dict):
+    def remove_dict_prefix(cls,old_state_dict ,start=7):
         new_state_dict = OrderedDict()
 
         for k, v in old_state_dict.items():
-            name = k[7:] # remove `module.`
+            name = k[start:] # remove `module.`
             new_state_dict[name] = v
     
+        return new_state_dict
+    @classmethod 
+    def remove_prefixes(cls , old_state_dict): 
+        words = ["module" , "student"]
+        new_state_dict = OrderedDict()
+        for k, v in old_state_dict.items():
+
+            for word in words: 
+                start = k.find(word) 
+                if start!= -1: 
+                    start = start + len(word) +1
+                    break
+            if start != -1: 
+                name = k[start:] # remove `module.` 
+                new_state_dict[name] = v
+            
         return new_state_dict

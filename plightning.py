@@ -21,7 +21,7 @@ train_scale = torch.Tensor([0.03125]) # pow2
 output_weights_path = str(Path("zoo/cifar10/workshop/resnet20").absolute() ) 
 FP_weights =output_weights_path + "/FP_weights.pth"
 model = resnet20() # Floating point 
-model.load_state_dict(DianaModule.remove_data_parallel(torch.load(FP_weights, map_location='cpu')['state_dict']) )
+model.load_state_dict(DianaModule.remove_dict_prefix(torch.load(FP_weights, map_location='cpu')['state_dict']) )
 # Fake quantisation layer 
 model.eval() 
 module_descriptions_pth = "/imec/other/csainfra/nada64/DianaTraining/serialized_models/resnet20.yaml"

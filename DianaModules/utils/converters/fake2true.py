@@ -14,18 +14,19 @@ from quantlib.editing.editing.fake2true.epstunnels.remover.rewriter import EpsTu
 from quantlib.editing.editing.fake2true.epstunnels.simplifier.rewriter import EpsTunnelConstructSimplifier
 from quantlib.editing.graphs.fx.tracing import QuantLibTracer
 
-
+# ! Important: If model's layer size is very large and model is trained with partial sums awareness, 
+# ! the result after layer integration cannot be used. The model will have to be tested on the actual chip
 class LayerIntegrizationConverter(ComposedEditor) :
     def __init__(self):
         super().__init__([AnalogNoiseDisabler () , # removed by onnx-runtime in exported onnx
    
             
         AnalogConvIntegrizer(),
-       # DianaLinearOpIntegrizer() , #problem is hereee
-        #AnalogOutRequantizer() ,
-       #     
-       #EpsTunnelConstructSimplifier() ,
-       #EpsTunnelRemover()
+        DianaLinearOpIntegrizer() , #problem is hereee
+        AnalogOutRequantizer() ,
+             
+        EpsTunnelConstructSimplifier() ,
+        EpsTunnelRemover()
           ]) 
     def apply(self, g: fx.GraphModule, *args, **kwargs) -> fx.GraphModule:
         for editor in self._children_editors:
