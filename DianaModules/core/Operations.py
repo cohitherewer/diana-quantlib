@@ -12,7 +12,7 @@ from typing import Union , Tuple
 from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qactivations import PACTReLU
 from quantlib.algorithms.qbase.qhparams.qhparams import create_qhparams
 from quantlib.algorithms.qbase.qrange.qrange import resolve_qrangespec
-
+from quantlib.algorithms.qalgorithms.qatalgorithms.pact import PACTConv2d
 
 
 from quantlib.algorithms.qmodules.qmodules import  QIdentity
@@ -236,7 +236,7 @@ class AnalogConv2d(DIANAConv2d):
             self.register_buffer("bw_clip_hi",  torch.tile(torch.Tensor([1]) , self.clip_hi.shape)) 
         else: 
             self.define_bitwidth_clipping() 
-        
+ 
  
 class AnalogOutIdentity(DIANAIdentity):  ## when observing , each forward pass randomly sample a group (except the last one ) and observe it
     def __init__(self ,qgranularityspec: QGranularitySpecType, qhparamsinitstrategyspec: QHParamsInitStrategySpecType,):

@@ -9,7 +9,7 @@ from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule
 # ---------------------------------------------------------------------------- #
 #                 Wrapper Class that steps every training iteration            #
 #                Quantization Stepper For _QModule Layers(only steps down)     # 
-#                    Example(steps = 2): 8b -> 5b -> 3b(ternary)               #
+#                    Example(steps = 2): 8b -> 5b -> (ternary)               #
 #       Only works with 1 class type.. if you need more create more instances  #
 # ---------------------------------------------------------------------------- #   
 class QuantDownStepper: 
@@ -17,6 +17,7 @@ class QuantDownStepper:
         assert steps != 0 , "Please use a non-zero step"
         self.module = module    
         qrange = resolve_qrangespec(target_quant)
+        
         self.target_quant = qrange
         self.target_zero, self.target_n_levels, _, _ = create_qhparams(qrange)
         qrange = resolve_qrangespec(initial_quant)
@@ -52,6 +53,11 @@ class QuantDownStepper:
         if self.current_step == 0: 
             zero = self.target_zero
             n_levels = self.target_n_levels
+        if module.n_levels <= 3: 
+            mean = torch.mean(module.weight)
+            std  = torch.std(module.weight) 
+            module._qrange = self.target_quant.clone()
+            #module.enable_scale_opt()
         print(f"ZERO:  Prev: {module.zero}  , new: {zero} ") 
         print(f"n_levels:  Prev: {module.n_levels}  , new: {n_levels} ") 
         module.n_levels =  torch.tile(n_levels,  module.n_levels.shape) 
@@ -68,4 +74,6 @@ class QuantDownStepper:
             module.bw_clip_hi = torch.tile(torch.Tensor([1]) , module.clip_hi.shape)
         else: 
             module.define_bitwidth_clipping() 
+
+        
     

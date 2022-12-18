@@ -59,6 +59,7 @@ from DianaModules.models.cifar10.LargeResnet import resnet20
 
 # instantiate the module
 module = resnet20() 
+
 # define the datasets 
 
 train_dataset = Dataset() 
@@ -73,7 +74,7 @@ val_dataset =  ds.CIFAR10('./data/cifar10/validation', train =False,download=Fal
 # define the data loaders
 train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
                               num_workers=args.num_workers, pin_memory=True, shuffle=True)
-val_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
+val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size,
                             num_workers=args.num_workers, pin_memory=True) 
 
 # define the logger
@@ -108,6 +109,7 @@ def train_fq():
     loader = ModulesLoader()
     module_description = loader.load(module_descriptions_pth) 
   # fake-quantize model and attach scales 
+
   model = DianaModule(DianaModule.from_trainedfp_model(module ,modules_descriptors=module_description)) 
 
 
@@ -115,7 +117,6 @@ def train_fq():
   model.attach_train_dataloader(train_dataloader, args.scale) 
   model.attach_quantization_dataloader(train_dataloader) 
   model.set_quantized(activations=False) 
-  model.gmodule.load_state_dict(torch.load(args.quantized_pth)["state_dict"]) 
   # Initialize modules needed for training
   distiller = QModelDistiller(student =model , teacher=module, learning_rate=args.lr, momentum=args.momentum,
            max_epochs=args.num_epochs, weight_decay=args.weight_decay, nesterov=False, lr_scheduler="COSINE" ,gamma= 0.0,optimizer="SGD", seed=42 , warm_up=100) 
@@ -126,41 +127,45 @@ def train_fq():
   checkpoint_act = ModelCheckpoint(args.checkpoint_dir, monitor='val_acc', mode='max',filename="FQ_ACT-{epoch:02d}-{val_acc:.4f}" ,save_top_k=1, save_on_train_epoch_end=False)
   # define trainers
   trainer = pl.Trainer(max_epochs=args.num_epochs, logger=logger,
-                      accelerator="gpu", strategy = "dp", devices=-1, callbacks=[early_stopping, checkpoint]) 
+                      accelerator="gpu", strategy = "dp", devices=[0], callbacks=[early_stopping, checkpoint]) 
   trainer_act = pl.Trainer(max_epochs=args.num_epochs, logger=logger,
-                      accelerator="gpu",strategy="dp",  devices=-1, callbacks=[early_stopping, checkpoint_act])   
+                      accelerator="gpu",strategy="dp",  devices=[0], callbacks=[early_stopping, checkpoint_act])   
   for i in range(args.quant_steps + 1): 
     #trainer.fit(model, train_dataloader , val_dataloader) 
     #trainer = pl.Trainer(max_epochs=args.num_epochs, logger=logger,
     #                  accelerator="gpu", devices=[1], callbacks=[early_stopping, checkpoint]) 
-    trainer.fit(distiller, train_dataloader , val_dataloader) 
+    if i ==0: 
+      trainer.fit(distiller, train_dataloader , val_dataloader) 
+    elif i== args.quant_steps:  
+      scales = [] 
+      for _ , mod in model.named_modules(): 
+        if isinstance(mod, AnalogConv2d): 
+          scales.append(mod.scale.clone())
+      model.set_optimizer("SGD", lr=0.01)
+      trainer.fit(model, train_dataloader , val_dataloader) 
+      nscales = [] 
+      for _ , mod in model.named_modules(): 
+        if isinstance(mod, AnalogConv2d): 
+          nscales.append(mod.scale.clone())
+      err = torch.sqrt(torch.sum(torch.pow((torch.stack(scales) -torch.stack(nscales) )/ torch.stack(scales) , 2))) 
+      print("relative error of module scale: ", err)
+      print("relative error of module scale: ", err)
+      print("relative error of module scale: ", err)
+      print("relative error of module scale: ", err)
+      trainer = pl.Trainer(max_epochs=args.num_epochs, logger=logger,
+                      accelerator="gpu", strategy = "dp", devices=[0], callbacks=[early_stopping, checkpoint]) 
+      trainer.fit(distiller , train_dataloader, val_dataloader)
     
     # Training with quantized activations 
     #quantize activations 
     if i ==args.quant_steps :  
       trainer.teardown() 
-      trainer = pl.Trainer(accelerator="gpu", devices=[1])
+      trainer = pl.Trainer(accelerator="gpu", devices=[0])
       model.initialize_quantization_activations(trainer, train_dataloader) 
       #retrain model with quantized activations 
       trainer_act.fit(distiller, train_dataloader , val_dataloader)   
       trainer_act.teardown() 
-    else: 
-     
-      module_descriptions_pth = args.config_pth
-      module_description = None
-      if module_descriptions_pth:  
-        loader = ModulesLoader()
-        module_description = loader.load(module_descriptions_pth) 
-      # fake-quantize model and attach scales 
-      teacher = DianaModule(DianaModule.from_trainedfp_model(module ,modules_descriptors=module_description)) 
-      # load quantized model  
-      teacher.attach_train_dataloader(train_dataloader, args.scale) 
-      teacher.attach_quantization_dataloader(train_dataloader) 
-      teacher.set_quantized(activations=False) 
-      teacher.gmodule.load_state_dict(DianaModule.remove_prefixes(torch.load(checkpoint.best_model_path )["state_dict"] )) 
-      distiller.teacher = teacher
-      
-      pass
+    
     # step down quantization 
     if stepper and i < args.quant_steps : 
       checkpoint.CHECKPOINT_NAME_LAST = checkpoint.CHECKPOINT_NAME_LAST + f"_{i}"
@@ -169,7 +174,7 @@ def train_fq():
       filename='FQ-{epoch:02d}-{val_acc:.4f}_'+str(i+1) ,save_top_k=1, save_on_train_epoch_end=False)
       trainer.teardown() 
       trainer = pl.Trainer(max_epochs=args.num_epochs, logger=logger,
-                      accelerator="gpu", strategy="dp", devices=-1,  callbacks=[early_stopping, checkpoint]) 
+                      accelerator="gpu", strategy="dp", devices=[0],  callbacks=[early_stopping, checkpoint]) 
       for _ , mod in model.named_modules(): 
         if (isinstance(mod, AnalogConv2d)) :  
             #info about fp weights
@@ -178,17 +183,9 @@ def train_fq():
             max  = torch.max(mod.weight)
             min  = torch.min(mod.weight)
             print(f"At {8-i-1} Bits, floating point information: \n mean: {mean} \n var: {var} \n max: {max} \n min: {min}")
-            #info about true quantized weights 
-            mean = torch.mean(mod.qweight/mod.scale)
-            var  = torch.var (mod.qweight/mod.scale)
-            max  = torch.max (mod.qweight/mod.scale)
-            min  = torch.min (mod.qweight/mod.scale)
-            print(f"At {8-i-1} Bits, true-quantized information: \n mean: {mean} \n var: {var} \n max: {max} \n min: {min}")
+            print(f"scale b {mod.scale}")
             break 
-      print(f"Testing {8-i-1} bits acc")
-      trainer.validate(model ,val_dataloader)
-              
-      stepper.step() 
+
       
 
 

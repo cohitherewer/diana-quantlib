@@ -75,8 +75,8 @@ class DianaModule(pl.LightningModule): # Base class for all diana models
             ({'types': ( 'Linear' )}, ('per-outchannel_weights', {'bitwidth': 8, 'signed': True},  'meanstd','DIANA')),
         )
         # Edit the following line if you want to use the quant stepper 
-        #analogcoredescriptionspec =  ('per-array', 'ternary' , 'meanstd' ) 
-        analogcoredescriptionspec =  ('per-array', {'bitwidth': 8 , 'signed': True} , 'meanstd' )  
+        analogcoredescriptionspec =  ('per-array', 'ternary' , 'meanstd' ) 
+        #analogcoredescriptionspec =  ('per-array', {'bitwidth': 8 , 'signed': True} , 'meanstd' )  
         #analogcoredescriptionspec =  ('per-array', {'bitwidth': 3 , 'signed': True} , 'meanstd' )  
 
             

@@ -2,7 +2,7 @@ import copy
 
 import pytorch_lightning as pl
 
-from DianaModules.utils.compression import QModelDistiller
+from DianaModules.utils.compression.ModelDistiller import QModelDistiller
 
 
 
@@ -28,24 +28,25 @@ class DistillObjective:
 
         scheduler_name = trial.suggest_categorical('scheduler', ['multistep', 'cosine'])
         if scheduler_name == 'cosine':
-            params['cosine_annealing'] = True
+            params['lr_scheduler'] = "cosine"
+
             params['gamma'] = 1.
             params["warm_up"] = 0
 
         else:
-            params['cosine_annealing'] = False
+            params['lr_scheduler'] = "multistep"
             params['gamma'] = trial.suggest_uniform('gamma', 0.1, 0.5)
             params["warm_up"] = trial.suggest_int('warm_up', 0, 2000, 250)
 
         model = QModelDistiller(
-            student=copy.deepcopy(self.student),  # make sure we start from same init
-            teacher=copy.deepcopy(self.teacher),
+            student=self.student,  # make sure we start from same init
+            teacher=self.teacher,
             seed=self.seed,
-            max_epochs=self.trainer_args.max_epochs,
+#            max_epochs=self.trainer_args.max_epochs,
             **params
         )
-        trainer = pl.Trainer.from_argparse_args(self.trainer_args)
+        #trainer = pl.Trainer.from_argparse_args(self.trainer_args)
+        trainer = pl.Trainer(gpus=[0])
 
         trainer.fit(model, self.datamodule)
-
         return trainer.checkpoint_callback.best_model_score

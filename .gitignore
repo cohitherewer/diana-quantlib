@@ -2,7 +2,6 @@
 data/*
 .vscode/*
 
-DianaModules/models/*
 
 *.pyc
 # Byte-compiled / optimized / DLL files
@@ -144,3 +143,4 @@ DianaModules/models/imagenet/train_val_map.txt
 DianaModules/models/imagenet/validation_val_map.txt
 outputs/*
 misc/*
+logs/*

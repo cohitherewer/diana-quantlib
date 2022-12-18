@@ -1,6 +1,6 @@
 import torch
 
-class true_quantize(torch.autograd.Function): # symmetric quantisation 
+class scale_optimize(torch.autograd.Function): # symmetric quantisation 
     @staticmethod
     def forward(ctx,  x:   torch.Tensor,
                    bw_clip_lo: torch.Tensor,

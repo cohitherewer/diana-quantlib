@@ -1,5 +1,6 @@
+from ast import Tuple
 from enum import Enum, auto
-from typing import Optional, Callable
+from typing import List, Optional, Callable
 
 import pytorch_lightning as pl
 import torch
@@ -46,7 +47,6 @@ class QModelDistiller(pl.LightningModule):
             weight_decay: float, nesterov: bool, lr_scheduler: str, gamma: float, optimizer: str,
             seed: int, version: str = None
     ):
-
         super().__init__()
         self.save_hyperparameters(
             'learning_rate', 'warm_up', 'momentum', 'weight_decay', 'nesterov', 'lr_scheduler', 'gamma',
@@ -59,6 +59,7 @@ class QModelDistiller(pl.LightningModule):
             p.requires_grad = False
 
         self.criterion = DistilLoss(0.5, 1.0)
+
 
         self.train_acc = torchmetrics.Accuracy()
         self.valid_acc = torchmetrics.Accuracy()
@@ -149,8 +150,17 @@ class QModelDistiller(pl.LightningModule):
             sched_type = LrScheduler[self.hparams.lr_scheduler.upper()]
         except KeyError:
             raise RuntimeError(f"Unknown optimizer type {self.hparams.lr_scheduler}")
+        
+        
+        if isinstance(self.hparams.learning_rate, tuple): 
+            self.hparams.learning_rate = self.hparams.learning_rate[0]
+            self.hparams.momentum = self.hparams.momentum[0]
+            self.hparams.weight_decay = self.hparams.weight_decay[0]
+        if isinstance(self.hparams.momentum, tuple): 
+            self.hparams.momentum = self.hparams.momentum[0]
 
         if opt_type is OptimizerType.SGD:
+            
             opts = [torch.optim.SGD(
                 self.student.parameters(),
                 lr=self.hparams.learning_rate,
