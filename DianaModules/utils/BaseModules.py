@@ -45,7 +45,11 @@ class DianaModule: # Base class for all diana models
         self._integrized = False 
         self.train_dataset = {} 
         self.validation_dataset = {}
-        
+    
+    def to(self, device):
+        self.gmodule = self.gmodule.to(device)
+        return self
+    
     def start_observing(self): #before starting training with FP 
         for _ ,module in self.gmodule.named_modules():
             if isinstance(module,( _QModule,HarmonisedAdd)) : 
@@ -135,7 +139,7 @@ class DianaModule: # Base class for all diana models
         self._integrized = True
         pass 
 
-    def export_model(self, data_folder : str): # x is an integrised tensor input is needed for validation in dory graph 
+    def export_model(self, data_folder : str, batch=0): # x is an integrised tensor input is needed for validation in dory graph 
         if not self._integrized: 
             raise NotImplementedError
 
@@ -145,7 +149,13 @@ class DianaModule: # Base class for all diana models
         x, _ = self.validation_dataset['dataset'].__getitem__(0)
         if len(x.shape) == 3 : 
             x = x.unsqueeze(0)
-        x = (x / self.validation_dataset['scale'] ). floor() #integrize 
+        
+        if batch > 0:
+            repeats = [1] * len(x.shape)
+            repeats[0] = batch
+            x = x.repeat(*repeats)
+            
+        x = (x / self.validation_dataset['scale'] ).floor() #integrize 
         exporter.export(network=self.gmodule, input_shape=x.shape, path=data_folder)
         exporter.dump_features(network=self.gmodule, x=x, path=data_folder ) 
         pass 
@@ -299,7 +309,7 @@ class DianaModule: # Base class for all diana models
         
         data_loader =  ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, pin_memory=True, shuffle=True)
         for idx , data in enumerate(data_loader): 
-             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+             x , y = data[0], data[1]
              _  = self.gmodule(x) 
              count -=1
              if count ==0: 
@@ -318,7 +328,7 @@ class DianaModule: # Base class for all diana models
         
         data_loader =  ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, pin_memory=True, shuffle=True)
         for idx , data in enumerate(data_loader): 
-             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+             x , y = data[0], data[1]
              _  = self.gmodule(x) 
              count -=1
              if count ==0: 
@@ -338,7 +348,7 @@ class DianaModule: # Base class for all diana models
         
         data_loader =  ut.DataLoader(self.train_dataset['dataset'], batch_size=batch_size, pin_memory=True, shuffle=True)
         for idx , data in enumerate(data_loader): 
-             x , y = data[0].to(DianaModule.device), data[1].to(DianaModule.device)
+             x , y = data[0], data[1]
              _  = self.gmodule(x) 
              count -=1
              if count ==0: 

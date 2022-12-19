@@ -90,7 +90,8 @@ class DianaExporter(DORYExporter) :
         data_folder =path+ "/" +onnxname+"optimized_model_NO_ANNOTATION.onnx" 
         sess_options.optimized_model_filepath = data_folder
         # generate optimized graph from non-annotated model 
-      
-        session = rt.InferenceSession(str(path) +f'/{onnxfilename}', sess_options)
+        sess_options.intra_op_num_threads = 1   
+    
+        session = rt.InferenceSession(str(path) +f'/{onnxfilename}', sess_options, ['CPUExecutionProvider'])
         #read optimized graph and annotate it with backend-specific information
         self._annotator.annotate(network, data_folder)
