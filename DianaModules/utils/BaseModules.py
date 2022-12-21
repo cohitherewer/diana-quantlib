@@ -366,7 +366,7 @@ class DianaModule(pl.LightningModule):  # Base class for all diana models
         return ls
 
     @classmethod
-    def remove_dict_prefix(cls, old_state_dict, start=7):
+    def remove_dict_prefix(cls, old_state_dict, start=8):
         new_state_dict = OrderedDict()
 
         for k, v in old_state_dict.items():
