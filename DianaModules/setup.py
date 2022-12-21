@@ -1,9 +1,9 @@
-#TBD
+# TBD
 
-#import setuptools
-#import os
+# import setuptools
+# import os
 
-#setuptools.setup(
+# setuptools.setup(
 #    name='dianasim',
 #    version='0.0',
 #    description='A package to train and integerise QNNs with the DIANA chip.',
@@ -15,4 +15,4 @@
 #        'torch',
 #        'quantlib',
 #    ],
-#)
+# )
