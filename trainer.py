@@ -82,7 +82,7 @@ parser.add_argument(
 parser.add_argument(
     "--scale",
     type=float,
-    default="0.0",
+    default="0.03125",
     help="the scale of dataset going through a quantizer with the same quant range as the input layer",
 )  # you can get it by passing it through a quantizer with the same quantization as the input layer. You can chek out the datasetscale.py file
 parser.add_argument(
