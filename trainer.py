@@ -125,7 +125,7 @@ val_dataset = Dataset()
 train_dataset = ds.CIFAR10(
     "./data/cifar10/train",
     train=True,
-    download=False,
+    download=True,
     transform=torchvision.transforms.Compose(
         [
             torchvision.transforms.RandomHorizontalFlip(),
@@ -140,7 +140,7 @@ train_dataset = ds.CIFAR10(
 val_dataset = ds.CIFAR10(
     "./data/cifar10/validation",
     train=False,
-    download=False,
+    download=True,
     transform=torchvision.transforms.Compose(
         [
             torchvision.transforms.ToTensor(),
