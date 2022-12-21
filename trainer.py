@@ -118,7 +118,6 @@ from DianaModules.models.cifar10.LargeResnet import resnet20
 module = resnet20()
 
 # define the datasets
-
 train_dataset = Dataset()
 val_dataset = Dataset()
 
@@ -186,7 +185,7 @@ def train_fp():
         args.checkpoint_dir,
         monitor="val_acc",
         mode="max",
-        filename=f"FP-{epoch:02d}-{val_acc:.4f}",
+        filename="FP-{epoch:02d}-{val_acc:.4f}",
         save_top_k=1,
         save_on_train_epoch_end=False,
     )
@@ -194,7 +193,6 @@ def train_fp():
     trainer = pl.Trainer(
         max_epochs=args.num_epochs,
         logger=logger,
-        distributed_backend="ddp",
         callbacks=[early_stopping, checkpoint],
     )
     # train the model
@@ -291,9 +289,6 @@ def train_fq():
         callbacks=[early_stopping, checkpoint_act],
     )
     for i in range(args.quant_steps + 1):
-        # trainer.fit(model, train_dataloader , val_dataloader)
-        # trainer = pl.Trainer(max_epochs=args.num_epochs, logger=logger,
-        #                  accelerator="gpu", devices=[1], callbacks=[early_stopping, checkpoint])
         if i == 0:
             trainer.fit(distiller, train_dataloader, val_dataloader)
         elif i == args.quant_steps:
@@ -316,9 +311,6 @@ def train_fq():
                     )
                 )
             )
-            print("relative error of module scale: ", err)
-            print("relative error of module scale: ", err)
-            print("relative error of module scale: ", err)
             print("relative error of module scale: ", err)
             trainer = pl.Trainer(
                 max_epochs=args.num_epochs,
@@ -411,7 +403,7 @@ def train_hw():
         args.checkpoint_dir,
         monitor="val_acc",
         mode="max",
-        filename=f"HW_{module.__name__}-{epoch:02d}-{val_acc:.4f}",
+        filename="HW_{module.__name__}-{epoch:02d}-{val_acc:.4f}",
         save_top_k=1,
         save_on_train_epoch_end=False,
     )
