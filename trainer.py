@@ -299,7 +299,7 @@ def train_fq():
     )
 
     # load quantized model
-    model.attach_train_dataloader(train_dataloader, args.scale)
+    model.attach_train_dataloader(train_dataloader, torch.tensor([args.scale]))
     model.attach_quantization_dataloader(train_dataloader)
     model.set_quantized(activations=False)
 
@@ -462,7 +462,7 @@ def train_hw():
         )
     )
     # load fq model
-    model.attach_train_dataloader(train_dataloader, args.scale)
+    model.attach_train_dataloader(train_dataloader, torch.tensor([args.scale]))
     model.attach_quantization_dataloader(train_dataloader)
     model.set_quantized()
 
