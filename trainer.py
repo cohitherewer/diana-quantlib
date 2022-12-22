@@ -1,4 +1,5 @@
 import argparse
+import os
 import copy
 from torch.utils.data import DataLoader, Dataset
 from DianaModules.core.Operations import AnalogConv2d
@@ -94,6 +95,20 @@ parser.add_argument(
     default="checkpoints/",
     help="the directory to save checkpoints",
 )
+
+parser.add_argument(
+    "--export_dir",
+    type=str,
+    default="export/",
+    help="the directory to export ONNX",
+)
+parser.add_argument(
+    "--export",
+    type=bool,
+    default=False,
+    help="Export to ONNX",
+)
+
 
 # quantization arguments
 # define where the floating point directory is
@@ -478,7 +493,7 @@ def train_hw():
         args.checkpoint_dir,
         monitor="val_acc",
         mode="max",
-        filename="HW_{module.__name__}-{epoch:02d}-{val_acc:.4f}",
+        filename="HW-{epoch:02d}-{val_acc:.4f}",
         save_top_k=1,
         save_on_train_epoch_end=False,
     )
@@ -492,6 +507,12 @@ def train_hw():
         callbacks=[early_stopping, checkpoint],
     )
     trainer.fit(model, train_dataloader, val_dataloader)
+
+    if args.export:
+        os.makedirs(args.export_dir, exist_ok=True)
+        model.to("cpu")
+        model.integrize_layers()
+        model.export_model(args.export_dir)
 
 
 def main():
