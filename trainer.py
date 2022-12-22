@@ -16,10 +16,16 @@ from DianaModules.utils.serialization.Loader import ModulesLoader
 # define the command line arguments
 parser = argparse.ArgumentParser()
 parser.add_argument(
+    "--dataset",
+    type=str,
+    default="mnist",
+    help="defines dataset to test [cifar, mnist]",
+)
+parser.add_argument(
     "--stage",
     type=str,
-    default="fp",
-    help="defines the stage in the conversion process where the model will be trained in",
+    default="",
+    help="defines the stage in the conversion process where the model will be trained in [fp, fq or hw]",
 )
 parser.add_argument(
     "--batch_size",
@@ -61,7 +67,25 @@ parser.add_argument(
     "--weight_decay",
     type=float,
     default=5e-4,
-    help="the number of epochs to wait for improvement before stopping",
+    help="weight decay parameter for the distiller",
+)
+parser.add_argument(
+    "--strategy",
+    type=str,
+    default="single_device",
+    help="the Trainer strategy",
+)
+parser.add_argument(
+    "--accelerator",
+    type=str,
+    default="auto",
+    help="the Trainer accelerator",
+)
+parser.add_argument(
+    "--devices",
+    type=str,
+    default="auto",
+    help="the Trainer devices",
 )
 
 parser.add_argument(
@@ -112,45 +136,87 @@ parser.add_argument(
 # parse the arguments
 args = parser.parse_args()
 # define your Pytorch Lightning module
-from DianaModules.models.cifar10.LargeResnet import resnet20
 
-# instantiate the module
-module = resnet20()
+if args.dataset == "mnist":
+    from DianaModules.models.mnist.LeNet import LeNet
 
-# define the datasets
-train_dataset = Dataset()
-val_dataset = Dataset()
+    # instantiate the module
+    module = LeNet()
 
-# Cifar 10 Dataset
-train_dataset = ds.CIFAR10(
-    "./data/cifar10/train",
-    train=True,
-    download=True,
-    transform=torchvision.transforms.Compose(
-        [
-            torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.RandomCrop(32, 4),
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(
-                (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-            ),
-        ]
-    ),
-)
-val_dataset = ds.CIFAR10(
-    "./data/cifar10/validation",
-    train=False,
-    download=True,
-    transform=torchvision.transforms.Compose(
-        [
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(
-                (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-            ),
-        ]
-    ),
-)
+    # define the datasets
+    train_dataset = Dataset()
+    val_dataset = Dataset()
 
+    # MNIST Dataset
+    train_dataset = ds.MNIST(
+        "./data/mnist/train",
+        train=True,
+        download=True,
+        transform=torchvision.transforms.Compose(
+            [
+                torchvision.transforms.Pad(2),
+                torchvision.transforms.RandomHorizontalFlip(),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.5), (0.5)),
+            ]
+        ),
+    )
+    val_dataset = ds.MNIST(
+        "./data/mnist/validation",
+        train=False,
+        download=True,
+        transform=torchvision.transforms.Compose(
+            [
+                torchvision.transforms.Pad(2),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.5), (0.5)),
+            ]
+        ),
+    )
+elif args.dataset == "cifar":
+    from DianaModules.models.cifar10.LargeResnet import resnet20
+
+    # instantiate the module
+    module = resnet20()
+
+    # define the datasets
+    train_dataset = Dataset()
+    val_dataset = Dataset()
+
+    # Cifar 10 Dataset
+    train_dataset = ds.CIFAR10(
+        "./data/cifar10/train",
+        train=True,
+        download=True,
+        transform=torchvision.transforms.Compose(
+            [
+                torchvision.transforms.RandomHorizontalFlip(),
+                torchvision.transforms.RandomCrop(32, 4),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+    )
+    val_dataset = ds.CIFAR10(
+        "./data/cifar10/validation",
+        train=False,
+        download=True,
+        transform=torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        ),
+    )
+else:
+    print(
+        "Invalid dataset " + args.dataset + ", valid options are [mnist,cifar]"
+    )
+    exit()
 
 # define the data loaders
 train_dataloader = DataLoader(
@@ -193,6 +259,9 @@ def train_fp():
     trainer = pl.Trainer(
         max_epochs=args.num_epochs,
         logger=logger,
+        accelerator=args.accelerator,
+        strategy=args.strategy,
+        devices=args.devices,
         callbacks=[early_stopping, checkpoint],
     )
     # train the model
@@ -205,11 +274,15 @@ def train_fq():
     )
     # load pre-trained floating point weights
     # Add helper function to remove module.
-    module.load_state_dict(
-        DianaModule.remove_dict_prefix(
-            torch.load(args.fp_pth, map_location="cpu")["state_dict"]
+    try:
+        module.load_state_dict(
+            DianaModule.remove_dict_prefix(
+                torch.load(args.fp_pth, map_location="cpu")["state_dict"]
+            )
         )
-    )
+    except:
+        print("No parameters loaded from " + args.fp_pth)
+
     module.eval()
     # load configurations file
     module_descriptions_pth = args.config_pth
@@ -229,6 +302,7 @@ def train_fq():
     model.attach_train_dataloader(train_dataloader, args.scale)
     model.attach_quantization_dataloader(train_dataloader)
     model.set_quantized(activations=False)
+
     # Initialize modules needed for training
     distiller = QModelDistiller(
         student=model,
@@ -255,6 +329,7 @@ def train_fq():
         if args.quant_steps != 0
         else None
     )
+
     checkpoint = ModelCheckpoint(
         args.checkpoint_dir,
         monitor="val_acc",
@@ -271,23 +346,25 @@ def train_fq():
         save_top_k=1,
         save_on_train_epoch_end=False,
     )
+
     # define trainers
     trainer = pl.Trainer(
         max_epochs=args.num_epochs,
         logger=logger,
-        accelerator="gpu",
-        strategy="dp",
-        devices=[0],
+        accelerator=args.accelerator,
+        strategy=args.strategy,
+        devices=args.devices,
         callbacks=[early_stopping, checkpoint],
     )
     trainer_act = pl.Trainer(
         max_epochs=args.num_epochs,
         logger=logger,
-        accelerator="gpu",
-        strategy="dp",
-        devices=[0],
+        accelerator=args.accelerator,
+        strategy=args.strategy,
+        devices=args.devices,
         callbacks=[early_stopping, checkpoint_act],
     )
+
     for i in range(args.quant_steps + 1):
         if i == 0:
             trainer.fit(distiller, train_dataloader, val_dataloader)
@@ -315,9 +392,9 @@ def train_fq():
             trainer = pl.Trainer(
                 max_epochs=args.num_epochs,
                 logger=logger,
-                accelerator="gpu",
-                strategy="dp",
-                devices=[0],
+                accelerator=args.accelerator,
+                strategy=args.strategy,
+                devices=args.devices,
                 callbacks=[early_stopping, checkpoint],
             )
             trainer.fit(distiller, train_dataloader, val_dataloader)
@@ -325,14 +402,11 @@ def train_fq():
         # Training with quantized activations
         # quantize activations
         if i == args.quant_steps:
-            trainer.teardown()
-            trainer = pl.Trainer(accelerator="gpu", devices=[0])
             model.initialize_quantization_activations(
                 trainer, train_dataloader
             )
             # retrain model with quantized activations
             trainer_act.fit(distiller, train_dataloader, val_dataloader)
-            trainer_act.teardown()
 
         # step down quantization
         if stepper and i < args.quant_steps:
@@ -348,13 +422,12 @@ def train_fq():
                 save_top_k=1,
                 save_on_train_epoch_end=False,
             )
-            trainer.teardown()
             trainer = pl.Trainer(
                 max_epochs=args.num_epochs,
                 logger=logger,
-                accelerator="gpu",
-                strategy="dp",
-                devices=[0],
+                accelerator=args.accelerator,
+                strategy=args.strategy,
+                devices=args.devices,
                 callbacks=[early_stopping, checkpoint],
             )
             for _, mod in model.named_modules():
@@ -375,10 +448,7 @@ def train_hw():
     print(
         "----------------------------------------------------------------------------\n                   Starting HW-mapped Training                        \n ---------------------------------------------------------------------------- "
     )
-    # load pre-trained floating point weights
-    module.load_state_dict(
-        torch.load(args.fp_pth, map_location="cpu")["state_dict"]
-    )
+
     # load configurations file
     module_descriptions_pth = args.config_pth
     module_description = None
@@ -395,9 +465,14 @@ def train_hw():
     model.attach_train_dataloader(train_dataloader, args.scale)
     model.attach_quantization_dataloader(train_dataloader)
     model.set_quantized()
-    model.load_state_dict(
-        torch.load(args.fq_pth, map_location="cpu")["state_dict"]
-    )
+
+    # load pre-trained fake quantized weights
+    try:
+        module.load_state_dict(
+            torch.load(args.fq_pth, map_location="cpu")["state_dict"]
+        )
+    except:
+        print("No parameters loaded from " + args.fq_pth)
 
     checkpoint = ModelCheckpoint(
         args.checkpoint_dir,
@@ -411,7 +486,9 @@ def train_hw():
     trainer = pl.Trainer(
         max_epochs=args.num_epochs,
         logger=logger,
-        strategy="ddp",
+        accelerator=args.accelerator,
+        strategy=args.strategy,
+        devices=args.devices,
         callbacks=[early_stopping, checkpoint],
     )
     trainer.fit(model, train_dataloader, val_dataloader)
@@ -422,8 +499,13 @@ def main():
         train_fp()
     elif args.stage == "fq":
         train_fq()
-    else:
+    elif args.stage == "hw":
         train_hw()  # basically hardware conversion is just the redefinition of the original scales and incorporation of DIANA's architecture constraints
+    else:
+        # by default just do all
+        train_fp()
+        train_fq()
+        train_hw()
 
 
 if __name__ == "__main__":
