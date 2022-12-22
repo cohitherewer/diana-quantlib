@@ -22,12 +22,12 @@ class LeNet(nn.Module):
         self.o = nn.Linear(84, 10)
 
     def forward(self, x):
-        y = F.relu(self.c1(x))
-        y = F.relu(self.s2(y))
-        y = F.relu(self.c3(y))
-        y = F.relu(self.s4(y))
+        y = F.relu(self.c1(x), inplace=True)
+        y = F.relu(self.s2(y), inplace=True)
+        y = F.relu(self.c3(y), inplace=True)
+        y = F.relu(self.s4(y), inplace=True)
         y = y.reshape((-1, 16 * 5 * 5))
-        y = F.relu(self.c5(y))
-        y = F.relu(self.f6(y))
+        y = F.relu(self.c5(y), inplace=True)
+        y = F.relu(self.f6(y), inplace=True)
         y = self.o(y)
         return y
