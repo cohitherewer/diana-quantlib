@@ -119,24 +119,21 @@ class DianaExporter(DORYExporter):
             opset_version=opset_version,
         )
 
-        sess_options = rt.SessionOptions()
+        options = rt.SessionOptions()
 
         # Set graph optimization level
-        sess_options.graph_optimization_level = (
+        options.graph_optimization_level = (
             rt.GraphOptimizationLevel.ORT_ENABLE_BASIC
         )
         # To enable model serialization after graph optimization set this
-        data_folder = (
-            path
-            + "/optimized/"
-            + onnxname
-            + "optimized_model_NO_ANNOTATION.onnx"
-        )
-        sess_options.optimized_model_filepath = data_folder
+        data_folder = path + "/" + onnxfilename
+        options.optimized_model_filepath = data_folder
         # generate optimized graph from non-annotated model
 
         session = rt.InferenceSession(
-            str(path) + f"/{onnxfilename}", sess_options
+            str(path) + f"/{onnxfilename}",
+            sess_options=options,
+            providers=["CPUExecutionProvider"],
         )
         # read optimized graph and annotate it with backend-specific information
         self._annotator.annotate(network, data_folder)
