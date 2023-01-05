@@ -4,6 +4,7 @@ import copy
 from torch.utils.data import DataLoader, Dataset
 from DianaModules.core.Operations import AnalogConv2d
 from DianaModules.utils.BaseModules import DianaModule
+from DianaModules.utils.LightningModules import DianaLightningModule
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
@@ -256,9 +257,13 @@ early_stopping = EarlyStopping(
     monitor="val_acc", patience=args.early_stopping_patience
 )
 
+dataset_item, _ = train_dataset.__getitem__(0)
+dataset_scale = torch.tensor([args.scale])
+
 
 def train_fp():
-    model = DianaModule(module)
+    fp_module = DianaModule(module)
+    model = DianaLightningModule(fp_module)
     # instantiate the trainer
     # define the checkpoint saving callback
 
@@ -298,7 +303,6 @@ def train_fq():
     except:
         print("No parameters loaded from " + args.fp_pth)
 
-    module.eval()
     # load configurations file
     module_descriptions_pth = args.config_pth
     module_description = None
@@ -307,16 +311,20 @@ def train_fq():
         module_description = loader.load(module_descriptions_pth)
     # fake-quantize model and attach scales
 
-    model = DianaModule(
+    fq_module = DianaModule(
         DianaModule.from_trainedfp_model(
             module, modules_descriptors=module_description
         )
     )
 
     # load quantized model
-    model.attach_train_dataloader(train_dataloader, torch.tensor([args.scale]))
-    model.attach_quantization_dataloader(train_dataloader)
-    model.set_quantized(activations=False)
+    fq_module.set_quantized(
+        activations=False,
+        dataset_item=dataset_item,
+        dataset_scale=dataset_scale,
+    )
+
+    model = DianaLightningModule(fq_module)
 
     # Initialize modules needed for training
     distiller = QModelDistiller(
@@ -417,8 +425,10 @@ def train_fq():
         # Training with quantized activations
         # quantize activations
         if i == args.quant_steps:
-            model.initialize_quantization_activations(
-                trainer, train_dataloader
+            model.diana_module.set_quantized(
+                activations=False,
+                dataset_item=dataset_item,
+                dataset_scale=dataset_scale,
             )
             # retrain model with quantized activations
             trainer_act.fit(distiller, train_dataloader, val_dataloader)
@@ -471,24 +481,33 @@ def train_hw():
         loader = ModulesLoader()
         module_description = loader.load(module_descriptions_pth)
     # fake-quantize model and attach scales
-    model = DianaModule(
+    fq_module = DianaModule(
         DianaModule.from_trainedfp_model(
             module, modules_descriptors=module_description
         )
     )
     # load fq model
-    model.attach_train_dataloader(train_dataloader, torch.tensor([args.scale]))
-    model.attach_quantization_dataloader(train_dataloader)
-    model.set_quantized()
+    fq_module.set_quantized(
+        activations=False,
+        dataset_item=dataset_item,
+        dataset_scale=dataset_scale,
+    )
 
     # load pre-trained fake quantized weights
     try:
-        module.load_state_dict(
+        fq_module.load_state_dict(
             torch.load(args.fq_pth, map_location="cpu")["state_dict"]
         )
     except:
         print("No parameters loaded from " + args.fq_pth)
 
+    # map to hw
+    fq_module.map_to_hw(
+        dataset_item=dataset_item,
+        dataset_scale=dataset_scale,
+    )
+
+    model = DianaLightningModule(fq_module)
     checkpoint = ModelCheckpoint(
         args.checkpoint_dir,
         monitor="val_acc",
@@ -497,7 +516,6 @@ def train_hw():
         save_top_k=1,
         save_on_train_epoch_end=False,
     )
-    model.map_to_hw()
     trainer = pl.Trainer(
         max_epochs=args.num_epochs,
         logger=logger,
@@ -511,8 +529,15 @@ def train_hw():
     if args.export:
         os.makedirs(args.export_dir, exist_ok=True)
         model.to("cpu")
-        model.integrize_layers()
-        model.export_model(args.export_dir)
+        model.diana_module.integrize_layers(
+            dataset_item=dataset_item,
+            dataset_scale=dataset_scale,
+        )
+        model.diana_module.export_model(
+            args.export_dir,
+            dataset_item=dataset_item,
+            dataset_scale=dataset_scale,
+        )
 
 
 def main():

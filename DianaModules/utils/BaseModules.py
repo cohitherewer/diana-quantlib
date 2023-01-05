@@ -40,28 +40,18 @@ import quantlib.backends as qb
 from torch import optim
 import torch.utils.data as ut
 from torch.utils.data import Dataset as ds
-import importlib
-import pytorch_lightning as pl
-import torchmetrics
 
 
-class DianaModule(pl.LightningModule):  # Base class for all diana models
+class DianaModule(nn.Module):  # Base class for all diana models
     def __init__(
         self,
         graph_module: Union[nn.Module, fx.graph_module.GraphModule] = None,
-        criterion=nn.CrossEntropyLoss(),
+        input_shape=None,
     ):
         super().__init__()
         self.gmodule = graph_module
         self._integrized = False
-        self.train_dataloader = {}
-        self.validation_dataloader = {}
-        self.quant_dataloader = {}
-        self.optimizer = None
-        self.train_acc = torchmetrics.Accuracy()
-        self.valid_acc = torchmetrics.Accuracy()
-        # self.test_acc = torchmetrics.Accuracy()
-        self.criterion = criterion
+        self._input_shape = input_shape
 
     def start_observing(
         self, is_modules=(_QModule, HarmonisedAdd), not_modules=type(None)
@@ -161,161 +151,31 @@ class DianaModule(pl.LightningModule):  # Base class for all diana models
 
         return converted_graph
 
-    def map_to_hw(self, custom_editors: List[Editor] = []):
-        # free relus upper boun d
-
-        for _, mod in self.named_modules():
-            if isinstance(mod, DIANAReLU):
-                mod.freeze()
-        converter = HWMappingConverter(custom_editor=custom_editors)
-        x, _ = self.train_dataloader["dataloader"].dataset.__getitem__(0)
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-        with torch.no_grad():
-            self.gmodule = converter(
-                self.gmodule,
-                {
-                    "x": {
-                        "shape": x.shape,
-                        "scale": self.train_dataloader["scale"],
-                    }
-                },
-                input=x,
-            )
-
-    def integrize_layers(self):
-
-        converter = LayerIntegrizationConverter()
-        x, _ = self.train_dataloader["dataloader"].dataset.__getitem__(0)
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-        x.to("cpu")
-        with torch.no_grad():
-            self.gmodule = converter(
-                self.gmodule,
-                {
-                    "x": {
-                        "shape": x.shape,
-                        "scale": self.train_dataloader["scale"],
-                    }
-                },
-            )
-        self._integrized = True
-        pass
-
-    def export_model(
-        self, data_folder: str
-    ):  # x is an integrised tensor input is needed for validation in dory graph
-        if not self._integrized:
-            raise NotImplementedError
-
-        exporter = DianaExporter()
-        from pathlib import Path
-
-        x, _ = self.train_dataloader["dataloader"].dataset.__getitem__(0)
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-        x = (x / self.train_dataloader["scale"]).floor()  # integrize
-        exporter.export(
-            network=self.gmodule, input_shape=x.shape, path=data_folder
-        )
-        exporter.dump_features(network=self.gmodule, x=x, path=data_folder)
-        pass
-
-    def attach_train_dataloader(
-        self, dataloader, scale: torch.Tensor = torch.Tensor([1])
+    def set_quantized(
+        self,
+        activations=True,
+        dataset_item=None,
+        dataset_scale=None,
     ):
-        self.train_dataloader["scale"] = scale
-        self.train_dataloader["dataloader"] = dataloader
-        self.train_dataloader["size"] = len(dataloader.dataset)
+        # does it matter which data is forwarded?
+        if dataset_item is None:
+            x = torch.zeros(*self._input_shape)
+        else:
+            x = dataset_item
 
-    def attach_validation_dataloader(
-        self, dataloader, scale: torch.Tensor = torch.Tensor([1])
-    ):
-        self.validation_dataloader["scale"] = scale
-        self.validation_dataloader["dataloader"] = dataloader
-        self.validation_dataloader["size"] = len(dataloader.dataset)
+        if len(x.shape) == 3:  # TODO: always unsqueeze?
+            x = x.unsqueeze(0)
 
-    def attach_quantization_dataloader(self, dataloader):
-        self.quant_dataloader["dataloader"] = dataloader
-        self.quant_dataloader["size"] = len(dataloader.dataset)
-
-    def training_step(self, batch, batch_idx, *args, **kwargs):
-        x, y = batch
-        if self._integrized:
-            x = torch.floor(x / self.train_dataloader["scale"].to(x.device))
-        yhat = self.gmodule(x)
-        loss = self.criterion(yhat, y)
-        self.log("train_loss", loss, prog_bar=True)
-        # acc
-        return {"loss": loss, "pred": yhat, "true": y}
-
-    def training_step_end(self, outputs):
-
-        self.train_acc(outputs["pred"], outputs["true"])
-        self.log(
-            "train_acc",
-            self.train_acc,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-
-        return outputs["loss"]
-
-    def test_step(self, batch, batch_idx, *args, **kwargs):  # for quantization
-
-        x, y = batch
+        if activations:
+            self.start_observing()
+        else:
+            self.start_observing(not_modules=_QActivation)
         _ = self.gmodule(x)
+        if activations:
+            self.stop_observing()
+        else:
+            self.stop_observing(not_modules=_QActivation)
 
-    def validation_step(self, batch, batch_idx, *args, **kwargs):
-        x, y = batch
-        # if self._integrized:
-        #    x = torch.floor(x / self.train_dataloader["scale"].to(x.device))
-        yhat = self.gmodule(x)
-
-        loss = self.criterion(yhat, y)
-
-        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-        return {"loss": loss, "pred": yhat, "true": y}
-
-    def validation_step_end(self, outputs):
-        self.valid_acc(outputs["pred"], outputs["true"])
-        self.log(
-            "val_acc",
-            self.valid_acc,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-
-        return outputs["loss"]
-
-    def set_optimizer(
-        self, type: str = "SGD", *args, **kwargs
-    ):  # case sensitive
-        my_module = importlib.import_module("torch.optim")
-        MyClass = getattr(my_module, type)
-        self.optimizer = MyClass(self.gmodule.parameters(), *args, **kwargs)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode="max", patience=5
-        )
-
-    def configure_optimizers(self):
-        self.set_optimizer("SGD", lr=0.01)
-        return {
-            "optimizer": self.optimizer,
-            "lr_scheduler": {
-                "scheduler": self.scheduler,
-                "monitor": "val_acc",
-            },
-        }
-
-    def initialize_quantization(self, trainer, dataloader):
-        self.start_observing()
-        trainer.test(model=self, dataloaders=dataloader)
-        self.stop_observing()
         for _, module in self.gmodule.named_modules():
             if (
                 type(module) == DIANAConv2d
@@ -329,29 +189,97 @@ class DianaModule(pl.LightningModule):  # Base class for all diana models
                     torch.exp2(torch.round(torch.log2(module.scale)))
                 )
 
-    def initialize_quantization_activations(self, trainer, dataloader):
-        self.start_observing(_QActivation)
-        trainer.test(model=self, dataloaders=dataloader)
-        self.stop_observing(_QActivation)
+    def map_to_hw(
+        self,
+        custom_editors: List[Editor] = [],
+        dataset_item=None,
+        dataset_scale=None,
+    ):
+        # free relus upper bound
+        for _, mod in self.named_modules():
+            if isinstance(mod, DIANAReLU):
+                mod.freeze()
+        converter = HWMappingConverter(custom_editor=custom_editors)
 
-    def initialize_quantization_layers(self, trainer, dataloader):
-        self.start_observing(not_modules=_QActivation)
-        trainer.test(model=self, dataloaders=dataloader)
-        self.stop_observing(not_modules=_QActivation)
+        # does it matter which data is forwarded?
+        if dataset_item is None:
+            x = torch.zeros(*self._input_shape)
+        else:
+            x = dataset_item
 
-    def set_quantized(self, activations=True):
-        x, _ = self.train_dataloader["dataloader"].dataset.__getitem__(0)
-        if len(x.size()) < 4:
+        if len(x.shape) == 3:  # TODO: always unsqueeze?
             x = x.unsqueeze(0)
-        if activations:
-            self.start_observing()
+
+        with torch.no_grad():
+            self.gmodule = converter(
+                self.gmodule,
+                {
+                    "x": {
+                        "shape": x.shape,
+                        "scale": dataset_scale,
+                    }
+                },
+                input=x,
+            )
+
+    def integrize_layers(
+        self,
+        dataset_item=None,
+        dataset_scale=None,
+    ):
+        converter = LayerIntegrizationConverter()
+
+        # does it matter which data is forwarded?
+        if dataset_item is None:
+            x = torch.zeros(*self._input_shape)
         else:
-            self.start_observing(not_modules=_QActivation)
-        _ = self.gmodule(x)
-        if activations:
-            self.stop_observing()
+            x = dataset_item
+
+        if len(x.shape) == 3:  # TODO: always unsqueeze?
+            x = x.unsqueeze(0)
+
+        x.to("cpu")
+        with torch.no_grad():
+            self.gmodule = converter(
+                self.gmodule,
+                {
+                    "x": {
+                        "shape": x.shape,
+                        "scale": dataset_scale,
+                    }
+                },
+            )
+        self._integrized = True
+
+    def export_model(
+        self,
+        data_folder: str,
+        dataset_item=None,
+        dataset_scale=None,
+    ):
+        # x is an integrised tensor input is needed for validation in dory graph
+        if not self._integrized:
+            raise NotImplementedError
+
+        exporter = DianaExporter()
+        from pathlib import Path
+
+        # does it matter which data is forwarded?
+        if dataset_item is None:
+            x = torch.zeros(*self._input_shape)
         else:
-            self.stop_observing(not_modules=_QActivation)
+            x = dataset_item
+
+        if len(x.shape) == 3:  # TODO: always unsqueeze?
+            x = x.unsqueeze(0)
+
+        x = (x / dataset_scale).floor()  # integrize
+
+        print(x.shape)
+        exporter.export(
+            network=self.gmodule, input_shape=x.shape, path=data_folder
+        )
+        exporter.dump_features(network=self.gmodule, x=x, path=data_folder)
 
     @classmethod
     def return_DFS(cls, node: fx.node.Node, depth: int):
