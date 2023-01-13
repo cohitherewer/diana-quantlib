@@ -151,26 +151,19 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
         return converted_graph
 
-    def set_quantized(
-        self,
-        activations=True,
-        dataset_item=None,
-        dataset_scale=None,
-    ):
-        # does it matter which data is forwarded?
-        if dataset_item is None:
-            x = torch.zeros(*self._input_shape)
-        else:
-            x = dataset_item
-
-        if len(x.shape) == 3:  # TODO: always unsqueeze?
-            x = x.unsqueeze(0)
-
+    def set_quantized(self, activations, dataset, batch_size=128):
         if activations:
             self.start_observing()
         else:
             self.start_observing(not_modules=_QActivation)
-        _ = self.gmodule(x)
+
+        data_loader = ut.DataLoader(
+            dataset, batch_size=batch_size, pin_memory=True, shuffle=True
+        )
+        for idx, data in enumerate(data_loader):
+            x, y = data[0], data[1]
+            _ = self.gmodule(x)
+
         if activations:
             self.stop_observing()
         else:
@@ -192,7 +185,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
     def map_to_hw(
         self,
         custom_editors: List[Editor] = [],
-        dataset_item=None,
+        dataset=None,
         dataset_scale=None,
     ):
         # free relus upper bound
@@ -202,10 +195,10 @@ class DianaModule(nn.Module):  # Base class for all diana models
         converter = HWMappingConverter(custom_editor=custom_editors)
 
         # does it matter which data is forwarded?
-        if dataset_item is None:
+        if dataset is None:
             x = torch.zeros(*self._input_shape)
         else:
-            x = dataset_item
+            x = dataset.__getitem__(0)[0]
 
         if len(x.shape) == 3:  # TODO: always unsqueeze?
             x = x.unsqueeze(0)
@@ -224,16 +217,16 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
     def integrize_layers(
         self,
-        dataset_item=None,
+        dataset=None,
         dataset_scale=None,
     ):
         converter = LayerIntegrizationConverter()
 
         # does it matter which data is forwarded?
-        if dataset_item is None:
+        if dataset is None:
             x = torch.zeros(*self._input_shape)
         else:
-            x = dataset_item
+            x = dataset.__getitem__(0)[0]
 
         if len(x.shape) == 3:  # TODO: always unsqueeze?
             x = x.unsqueeze(0)
@@ -254,7 +247,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
     def export_model(
         self,
         data_folder: str,
-        dataset_item=None,
+        dataset=None,
         dataset_scale=None,
     ):
         # x is an integrised tensor input is needed for validation in dory graph
@@ -265,17 +258,16 @@ class DianaModule(nn.Module):  # Base class for all diana models
         from pathlib import Path
 
         # does it matter which data is forwarded?
-        if dataset_item is None:
+        if dataset is None:
             x = torch.zeros(*self._input_shape)
         else:
-            x = dataset_item
+            x = dataset.__getitem__(0)[0]
 
         if len(x.shape) == 3:  # TODO: always unsqueeze?
             x = x.unsqueeze(0)
 
         x = (x / dataset_scale).floor()  # integrize
 
-        print(x.shape)
         exporter.export(
             network=self.gmodule, input_shape=x.shape, path=data_folder
         )

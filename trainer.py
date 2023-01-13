@@ -257,7 +257,6 @@ early_stopping = EarlyStopping(
     monitor="val_acc", patience=args.early_stopping_patience
 )
 
-dataset_item, _ = train_dataset.__getitem__(0)
 dataset_scale = torch.tensor([args.scale])
 
 
@@ -320,8 +319,7 @@ def train_fq():
     # load quantized model
     fq_module.set_quantized(
         activations=False,
-        dataset_item=dataset_item,
-        dataset_scale=dataset_scale,
+        dataset=train_dataset,
     )
 
     model = DianaLightningModule(fq_module)
@@ -427,8 +425,7 @@ def train_fq():
         if i == args.quant_steps:
             model.diana_module.set_quantized(
                 activations=False,
-                dataset_item=dataset_item,
-                dataset_scale=dataset_scale,
+                dataset=train_dataset,
             )
             # retrain model with quantized activations
             trainer_act.fit(distiller, train_dataloader, val_dataloader)
@@ -489,8 +486,7 @@ def train_hw():
     # load fq model
     fq_module.set_quantized(
         activations=False,
-        dataset_item=dataset_item,
-        dataset_scale=dataset_scale,
+        dataset=train_dataset,
     )
 
     # load pre-trained fake quantized weights
@@ -503,7 +499,7 @@ def train_hw():
 
     # map to hw
     fq_module.map_to_hw(
-        dataset_item=dataset_item,
+        dataset=train_dataset,
         dataset_scale=dataset_scale,
     )
 
@@ -530,12 +526,12 @@ def train_hw():
         os.makedirs(args.export_dir, exist_ok=True)
         model.to("cpu")
         model.diana_module.integrize_layers(
-            dataset_item=dataset_item,
+            dataset=train_dataset,
             dataset_scale=dataset_scale,
         )
         model.diana_module.export_model(
             args.export_dir,
-            dataset_item=dataset_item,
+            dataset=train_dataset,
             dataset_scale=dataset_scale,
         )
 
