@@ -21,27 +21,19 @@ NNMODULE_TO_DIANA = ModuleMapping(
 )
 
 register["DIANA"] = NNMODULE_TO_DIANA
-# import onnx
-# import torch
-# def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs):
-# n = ctx.cur_node
 
 
-# name = kwargs["name"]
-# ret = None
-# if name == "DigitalQuantOp":
-
-# ret =g.op("Clip" ,g.op("Floor", g.op("Div", args[0] , args[1] )) , args[2] , args[3])
+from DianaModules.utils.BaseModules import DianaModule
+from DianaModules.utils.serialization.Loader import ModulesLoader
 
 
-# else:
-## Logs a warning and returns None
-# return torch._unimplemented("prim::PythonOp", "unknown node kind: " + name)
-## Copy type and shape from original node.
+def from_torch_model(model, descriptors_file=None):
+    module_descriptions = None
+    if descriptors_file is not None:
+        loader = ModulesLoader()
+        module_descriptions = loader.load(descriptors_file)
 
-
-# ret.setType(n.output().type())
-# return ret
-
-# from torch.onnx import register_custom_op_symbolic
-# register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
+    fake_quantized_model = DianaModule.from_trainedfp_model(
+        model=model, modules_descriptors=module_descriptions
+    )
+    return DianaModule(fake_quantized_model)
