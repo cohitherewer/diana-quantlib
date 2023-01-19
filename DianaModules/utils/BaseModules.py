@@ -151,17 +151,21 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
         return converted_graph
 
-    def set_quantized(self, activations, dataset, batch_size=128):
+    def set_quantized(self, activations, dataset=None, batch_size=128):
         if activations:
             self.start_observing()
         else:
             self.start_observing(not_modules=_QActivation)
 
-        data_loader = ut.DataLoader(
-            dataset, batch_size=batch_size, pin_memory=True, shuffle=True
-        )
-        for idx, data in enumerate(data_loader):
-            x, y = data[0], data[1]
+        if dataset is not None:
+            data_loader = ut.DataLoader(
+                dataset, batch_size=batch_size, pin_memory=True, shuffle=True
+            )
+            for idx, data in enumerate(data_loader):
+                x, y = data[0], data[1]
+                _ = self.gmodule(x)
+        else:
+            x = torch.randn(*self._input_shape).unsqueeze(0)
             _ = self.gmodule(x)
 
         if activations:
@@ -184,9 +188,9 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
     def map_to_hw(
         self,
-        custom_editors: List[Editor] = [],
+        dataset_scale,
         dataset=None,
-        dataset_scale=None,
+        custom_editors: List[Editor] = [],
     ):
         # free relus upper bound
         for _, mod in self.named_modules():
@@ -196,7 +200,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
         # does it matter which data is forwarded?
         if dataset is None:
-            x = torch.zeros(*self._input_shape)
+            x = torch.randn(*self._input_shape)
         else:
             x = dataset.__getitem__(0)[0]
 
@@ -217,14 +221,14 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
     def integrize_layers(
         self,
+        dataset_scale,
         dataset=None,
-        dataset_scale=None,
     ):
         converter = LayerIntegrizationConverter()
 
         # does it matter which data is forwarded?
         if dataset is None:
-            x = torch.zeros(*self._input_shape)
+            x = torch.randn(*self._input_shape)
         else:
             x = dataset.__getitem__(0)[0]
 
@@ -246,9 +250,9 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
     def export_model(
         self,
-        data_folder: str,
+        export_folder: str,
+        dataset_scale,
         dataset=None,
-        dataset_scale=None,
     ):
         # x is an integrised tensor input is needed for validation in dory graph
         if not self._integrized:
@@ -259,7 +263,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
         # does it matter which data is forwarded?
         if dataset is None:
-            x = torch.zeros(*self._input_shape)
+            x = torch.randn(*self._input_shape)
         else:
             x = dataset.__getitem__(0)[0]
 
@@ -269,9 +273,9 @@ class DianaModule(nn.Module):  # Base class for all diana models
         x = (x / dataset_scale).floor()  # integrize
 
         exporter.export(
-            network=self.gmodule, input_shape=x.shape, path=data_folder
+            network=self.gmodule, input_shape=x.shape, path=export_folder
         )
-        exporter.dump_features(network=self.gmodule, x=x, path=data_folder)
+        exporter.dump_features(network=self.gmodule, x=x, path=export_folder)
 
     @classmethod
     def return_DFS(cls, node: fx.node.Node, depth: int):
