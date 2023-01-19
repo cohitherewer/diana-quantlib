@@ -291,6 +291,9 @@ def train_fq():
     print(
         "----------------------------------------------------------------------------\n                   Starting Fake-Quantization Training                        \n ---------------------------------------------------------------------------- "
     )
+    
+    global fq_module
+    
     # load pre-trained floating point weights
     # Add helper function to remove module.
     try:
@@ -302,21 +305,17 @@ def train_fq():
     except:
         print("No parameters loaded from " + args.fp_pth)
 
-    # load configurations file
+    # fake quantize model
     module_descriptions_pth = args.config_pth
     module_description = None
     if module_descriptions_pth:
         loader = ModulesLoader()
         module_description = loader.load(module_descriptions_pth)
-    # fake-quantize model and attach scales
-
     fq_module = DianaModule(
         DianaModule.from_trainedfp_model(
             module, modules_descriptors=module_description
         )
     )
-
-    # load quantized model
     fq_module.set_quantized(
         activations=False,
         dataset=train_dataset,
@@ -424,7 +423,7 @@ def train_fq():
         # quantize activations
         if i == args.quant_steps:
             model.diana_module.set_quantized(
-                activations=False,
+                activations=True,
                 dataset=train_dataset,
             )
             # retrain model with quantized activations
@@ -467,27 +466,26 @@ def train_fq():
 
 
 def train_hw():
+    global fq_module
     print(
         "----------------------------------------------------------------------------\n                   Starting HW-mapped Training                        \n ---------------------------------------------------------------------------- "
     )
-
-    # load configurations file
-    module_descriptions_pth = args.config_pth
-    module_description = None
-    if module_descriptions_pth:
-        loader = ModulesLoader()
-        module_description = loader.load(module_descriptions_pth)
-    # fake-quantize model and attach scales
-    fq_module = DianaModule(
-        DianaModule.from_trainedfp_model(
-            module, modules_descriptors=module_description
+    
+    if fq_module is None:
+        module_descriptions_pth = args.config_pth
+        module_description = None
+        if module_descriptions_pth:
+            loader = ModulesLoader()
+            module_description = loader.load(module_descriptions_pth)
+        fq_module = DianaModule(
+            DianaModule.from_trainedfp_model(
+                module, modules_descriptors=module_description
+            )
         )
-    )
-    # load fq model
-    fq_module.set_quantized(
-        activations=False,
-        dataset=train_dataset,
-    )
+        fq_module.set_quantized(
+            activations=True,
+            dataset=train_dataset,
+        )
 
     # load pre-trained fake quantized weights
     try:
@@ -499,8 +497,8 @@ def train_hw():
 
     # map to hw
     fq_module.map_to_hw(
-        dataset=train_dataset,
         dataset_scale=dataset_scale,
+        dataset=train_dataset,
     )
 
     model = DianaLightningModule(fq_module)
@@ -526,13 +524,13 @@ def train_hw():
         os.makedirs(args.export_dir, exist_ok=True)
         model.to("cpu")
         model.diana_module.integrize_layers(
-            dataset=train_dataset,
             dataset_scale=dataset_scale,
+            dataset=train_dataset,
         )
         model.diana_module.export_model(
             args.export_dir,
-            dataset=train_dataset,
             dataset_scale=dataset_scale,
+            dataset=train_dataset,
         )
 
 
