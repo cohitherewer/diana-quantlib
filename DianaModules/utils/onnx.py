@@ -42,9 +42,9 @@ class DianaAnnotator(ONNXAnnotator):
                     (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d),
                 ):
                     weight_bits = (
-                        8
+                        2
                         if pytorch_module.is_analog == torch.Tensor([1])
-                        else 3
+                        else 8
                     )  # check register buffer inside conv layer to know if it's analog or not
                     bias_bits = 32
                     annotations.append(

@@ -110,7 +110,8 @@ class DianaModule(nn.Module):  # Base class for all diana models
             (
                 {"types": ("Conv2d")},
                 (
-                    "per-outchannel_weights",
+                    #"per-outchannel_weights",
+                    "per-array",
                     {"bitwidth": 8, "signed": True},
                     "meanstd",
                     "DIANA",
@@ -119,7 +120,8 @@ class DianaModule(nn.Module):  # Base class for all diana models
             (
                 {"types": ("Linear")},
                 (
-                    "per-outchannel_weights",
+                    #"per-outchannel_weights",
+                    "per-array",
                     {"bitwidth": 8, "signed": True},
                     "meanstd",
                     "DIANA",
