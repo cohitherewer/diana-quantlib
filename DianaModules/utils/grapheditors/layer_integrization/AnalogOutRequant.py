@@ -4,6 +4,7 @@ from DianaModules.core.Operations import AnalogAccumulator, AnalogOutIdentity
 
 from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
 from quantlib.editing.editing.editors.nnmodules.finder.nnsequential import PathGraphMatcher
+from quantlib.editing.editing.fake2true.integerisation.requantiser.finder import RequantiserMatcher
 
 
 from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
@@ -86,6 +87,6 @@ class AnalogOutRequantizer(ComposedEditor):
         for name, pattern in generate_named_patterns(roles, admissible_screenplays):
             class_name = name + 'analogout'
 
-            class_ = get_rewriter_class(class_name, pattern, PathGraphMatcher, AnalogOutRequantizerApplier)
+            class_ = get_rewriter_class(class_name, pattern, RequantiserMatcher, AnalogOutRequantizerApplier)
             namespace[class_name] = class_   
         super(AnalogOutRequantizer, self).__init__([class_() for class_ in namespace.values()])

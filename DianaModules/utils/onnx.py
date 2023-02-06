@@ -72,7 +72,7 @@ class DianaAnnotator(ONNXAnnotator):
             elif (
                 op_type in dory_onnxnode_op_types["mul"]
             ):  # only for analog core. still don't have specs
-                mul_bits = self._requantisation_bits
+                mul_bits = 8
                 annotations.append(
                     onnx.helper.make_attribute(key="mult_bits", value=mul_bits)
                 )

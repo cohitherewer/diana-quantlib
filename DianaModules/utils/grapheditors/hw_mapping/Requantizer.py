@@ -26,11 +26,10 @@ checker = (lambda m : True if type(m) != AnalogOutIdentity else False, )
 roles = Roles([
 
     ('eps_in',  Candidates([
-        ('',     None),  
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
     ])),
     ('accumulator',  Candidates([
-         ('',     None),  #analog accumulator is an optional part of the pattern
+        ('',     None),  #analog accumulator is an optional part of the pattern
         ('AniaAccumulator', NNModuleDescription(class_=AnalogAccumulator, kwargs={})),
     ])),
     ('bn', Candidates([
