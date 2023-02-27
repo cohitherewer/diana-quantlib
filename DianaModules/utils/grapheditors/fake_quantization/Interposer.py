@@ -5,7 +5,7 @@ from quantlib.editing.editing.editors.base.rewriter.applier import Applier
 from quantlib.editing.editing.editors.base.rewriter.finder import Finder
 from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 import torch.fx as fx
-from quantlib.editing.graphs.fx import quantlib_symbolic_trace
+from quantlib.editing.graphs.fx import quantlib_symbolic_trace, FXOpcodeClasses
 
 from DianaModules.core.Operations import AnalogAccumulator, AnalogConv2d, AnalogOutIdentity, DIANAIdentity, DIANALinear, IdentityType , DIANAConv2d
 
@@ -38,6 +38,10 @@ class DianaOpQuantFinder(Finder):
         for n in g.graph.nodes: 
             if n.target in name_to_module.keys(): 
                 aps.append(DianaAps(getmodule_name(name_to_module[n.target]), n))
+                # Comment line above and uncomment lines below in case input nodes should not be quantized
+                #prev = [p for p in n.all_input_nodes][0]
+                #if prev.op not in FXOpcodeClasses.PLACEHOLDER.value:
+                #    aps.append(DianaAps(getmodule_name(name_to_module[n.target]), n))
             
 
         return aps
@@ -56,8 +60,10 @@ class DianaOpQuantApplier(Applier):
             type_out = IdentityType.AIMC_OUT 
        
         qpre = DIANAIdentity( qrangespec= type_in ,qgranularityspec='per-array', qhparamsinitstrategyspec='meanstd')
-        qpost = AnalogOutIdentity(qgranularityspec='per-array', qhparamsinitstrategyspec='meanstd') if type_out == IdentityType.AIMC_OUT else None
-        #qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd', type_out) if type_out == IdentityType.AIMC_OUT else None
+        if type_out == IdentityType.AIMC_OUT:
+            qpost = AnalogOutIdentity(qgranularityspec='per-array', qhparamsinitstrategyspec='meanstd')
+        else:
+            qpost = DIANAIdentity({'bitwidth':8 , 'signed': True} , 'per-array', 'meanstd')
   
         pre_target = id_ 
         

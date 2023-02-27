@@ -10,29 +10,43 @@ from quantlib.editing.editing.editors.base.rewriter.rewriter import Rewriter
 import torch.fx as fx
 from quantlib.editing.editing.float2fake.quantisation.modulewiseconverter.modulewisedescription.nametomodule.nametomodule import NameToModule
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
+
+
 #  Analog conv should be placed before interposer
 class AnalogConvFinder(Finder) : 
+
     def __init__(self, modules_descriptors = None) -> None:
         super().__init__()
         self._descriptors = modules_descriptors
+
     def find(self, g: fx.GraphModule) -> List[DianaAps]:
         aps : List[DianaAps] =[]
         
-        for node  in g.graph.nodes: 
-            try: 
-                if isinstance(g.get_submodule(node.target), DIANAConv2d): 
-                    if self._descriptors is None and g.get_submodule(node.target).is_analog: 
-                        aps.append(DianaAps('aconv' ,node)) 
-                    else: 
-                        # TODO Add feature for depthwise seperable convs 
-                        assert node.target in self._descriptors.keys() 
-                        if self._descriptors[node.target]['core_choice'].upper() == 'ANALOG': 
-                            aps.append(DianaAps('aconv' ,node)) 
-            except: pass 
+        for node in g.graph.nodes:
+            try:
+                module = g.get_submodule(node.target)
+            except AttributeError:
+                continue
+
+            if not isinstance(module, DIANAConv2d):
+                continue
+
+            is_grouped = module.groups > 1
+            if self._descriptors is None:
+                if module.is_analog and not is_grouped:
+                    aps.append(DianaAps('aconv', node))
+            else:
+                assert node.target in self._descriptors.keys()
+                if self._descriptors[node.target]['core_choice'].upper() == 'ANALOG':
+                    # Analog core doesn't support depthwise separable convolutions
+                    assert not is_grouped, f"Analog core doesn't support grouped (depthwise) convolutions, please change the core_choice for layer '{node.target}'"
+                    aps.append(DianaAps('aconv', node))
         
         return aps 
+
     def check_aps_commutativity(self, aps: List[DianaAps]) -> bool:
         return len(aps) == len(set(ap.node for ap in aps))  # each `fx.Node` should appear at most once 
+
 
 class AnalogConvApplier(Applier) : 
     def __init__(self, description : Tuple[str , ...], modules_descriptors = None): 

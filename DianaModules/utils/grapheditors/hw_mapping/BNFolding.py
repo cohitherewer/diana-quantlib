@@ -19,16 +19,20 @@ from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.fac
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.factory.roles import Roles
 from quantlib.editing.editing.editors.nnmodules.pattern.nnsequential.pattern import NNSequentialPattern
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
-from DianaModules.core.Operations import AnalogConv2d, DIANAConv2d , DIANALinear
+from DianaModules.core.Operations import AnalogConv2d, DIANAConv2d, DIANALinear, DIANAIdentity
 from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
-BN_FOLDING_LAYERS= (DIANAConv2d ,DIANALinear)
+
 checker = (lambda m : True if type(m) != AnalogConv2d else False, )
 
-roles = Roles([
+_QOP_KWARGS = {'qrangespec': {'bitwidth': 8, 'signed': True}, 'qgranularityspec': 'per-array', 'qhparamsinitstrategyspec': 'meanstd'}
 
+roles = Roles([
     ('linear',  Candidates([
-        ('Conv', NNModuleDescription(class_=DIANAConv2d, kwargs={'qrangespec':{'bitwidth': 8  , 'signed': True} , 'qgranularityspec':'per-array' , 'qhparamsinitstrategyspec' :'meanstd','in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}, checkers=checker)),
+        ('Conv', NNModuleDescription(class_=DIANAConv2d, kwargs=_QOP_KWARGS | {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}, checkers=checker)),
         ('FC', NNModuleDescription(class_=nn.Linear,kwargs={'in_features': 1, 'out_features': 1, 'bias': True})),
+    ])),
+    ('interposer', Candidates([
+        ('DianaInterposer', NNModuleDescription(class_=DIANAIdentity, kwargs=_QOP_KWARGS)),
     ])),
     ('bn', Candidates([
         ('BN2d', NNModuleDescription(class_=nn.BatchNorm2d, kwargs={'num_features': 1})),

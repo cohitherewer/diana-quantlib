@@ -46,12 +46,10 @@ class DianaModule(nn.Module):  # Base class for all diana models
     def __init__(
         self,
         graph_module: Union[nn.Module, fx.graph_module.GraphModule] = None,
-        input_shape=None,
     ):
         super().__init__()
         self.gmodule = graph_module
         self._integrized = False
-        self._input_shape = input_shape
 
     def start_observing(
         self, is_modules=(_QModule, HarmonisedAdd), not_modules=type(None)
@@ -153,22 +151,17 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
         return converted_graph
 
-    def set_quantized(self, activations, dataset=None, batch_size=128):
+    def set_quantized(self, activations, dataset_item):
+        """
+        dataset_item (torch.Tensor):  tensor with batch size >= 1
+        """
         if activations:
             self.start_observing()
         else:
             self.start_observing(not_modules=_QActivation)
 
-        if dataset is not None:
-            data_loader = ut.DataLoader(
-                dataset, batch_size=batch_size, pin_memory=True, shuffle=True
-            )
-            for idx, data in enumerate(data_loader):
-                x, y = data[0], data[1]
-                _ = self.gmodule(x)
-        else:
-            x = torch.randn(*self._input_shape).unsqueeze(0)
-            _ = self.gmodule(x)
+        for x in dataset_item:
+            _ = self.gmodule(x.unsqueeze(0))
 
         if activations:
             self.stop_observing()
@@ -191,59 +184,48 @@ class DianaModule(nn.Module):  # Base class for all diana models
     def map_to_hw(
         self,
         dataset_scale,
-        dataset=None,
+        dataset_item,
         custom_editors: List[Editor] = [],
     ):
+        """
+        dataset_scale (torch.tensor): single scale value
+        dataset_item (torch.Tensor):  tensor with batch size = 1
+        """
         # free relus upper bound
         for _, mod in self.named_modules():
             if isinstance(mod, DIANAReLU):
                 mod.freeze()
         converter = HWMappingConverter(custom_editor=custom_editors)
 
-        # does it matter which data is forwarded?
-        if dataset is None:
-            x = torch.randn(*self._input_shape)
-        else:
-            x = dataset.__getitem__(0)[0]
-
-        if len(x.shape) == 3:  # TODO: always unsqueeze?
-            x = x.unsqueeze(0)
-
         with torch.no_grad():
             self.gmodule = converter(
                 self.gmodule,
                 {
                     "x": {
-                        "shape": x.shape,
+                        "shape": dataset_item.shape,
                         "scale": dataset_scale,
                     }
                 },
-                input=x,
+                input=dataset_item,
             )
 
     def integrize_layers(
         self,
         dataset_scale,
-        dataset=None,
+        dataset_item,
     ):
+        """
+        dataset_scale (torch.tensor): single scale value
+        dataset_item (torch.Tensor):  tensor with batch size = 1
+        """
         converter = LayerIntegrizationConverter()
 
-        # does it matter which data is forwarded?
-        if dataset is None:
-            x = torch.randn(*self._input_shape)
-        else:
-            x = dataset.__getitem__(0)[0]
-
-        if len(x.shape) == 3:  # TODO: always unsqueeze?
-            x = x.unsqueeze(0)
-
-        x.to("cpu")
         with torch.no_grad():
             self.gmodule = converter(
                 self.gmodule,
                 {
                     "x": {
-                        "shape": x.shape,
+                        "shape": dataset_item.shape,
                         "scale": dataset_scale,
                     }
                 },
@@ -254,8 +236,12 @@ class DianaModule(nn.Module):  # Base class for all diana models
         self,
         export_folder: str,
         dataset_scale,
-        dataset=None,
+        dataset_item,
     ):
+        """
+        dataset_scale (torch.tensor): single scale value
+        dataset_item (torch.Tensor):  tensor with batch size = 1
+        """
         # x is an integrised tensor input is needed for validation in dory graph
         if not self._integrized:
             raise NotImplementedError
@@ -263,16 +249,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
         exporter = DianaExporter()
         from pathlib import Path
 
-        # does it matter which data is forwarded?
-        if dataset is None:
-            x = torch.randn(*self._input_shape)
-        else:
-            x = dataset.__getitem__(0)[0]
-
-        if len(x.shape) == 3:  # TODO: always unsqueeze?
-            x = x.unsqueeze(0)
-
-        x = (x / dataset_scale).floor()  # integrize
+        x = (dataset_item / dataset_scale).floor()  # integrize
 
         exporter.export(
             network=self.gmodule, input_shape=x.shape, path=export_folder
