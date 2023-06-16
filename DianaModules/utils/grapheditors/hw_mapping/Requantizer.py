@@ -117,7 +117,7 @@ class DianaRequantizerApplier(NNModuleApplier): # this will probably have to be 
             if  torch.all(gamma_int.eq(torch.Tensor([0]))) :  # truncation 
                 raise RuntimeError('epsilon cannot be quantized with current bitwidth. Something wrong in training phase ')
             #if '[9]' not in node_activation.target: 
-            div = torch.exp2(torch.round(torch.log2(eps_out             / ( eps_in))))
+            div = eps_out / eps_in
                 
             #else: 
             #    pred = [p for p in node_activation.all_input_nodes] [0]

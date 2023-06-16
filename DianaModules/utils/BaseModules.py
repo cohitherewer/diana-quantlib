@@ -6,7 +6,7 @@ from math import log2, floor
 from pathlib import Path
 from random import randint
 import sched
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, Generator
 
 from DianaModules.core.Operations import (
     AnalogConv2d,
@@ -45,10 +45,27 @@ from torch.utils.data import Dataset as ds
 class DianaModule(nn.Module):  # Base class for all diana models
     def __init__(
         self,
-        graph_module: Union[nn.Module, fx.graph_module.GraphModule] = None,
+        graph_module: Union[nn.Module, fx.graph_module.GraphModule],
+        representative_dataset: Generator,
+        dataset_scale: torch.tensor = torch.tensor(1.0)
+
     ):
+        """
+        graph_module:           floating-point pytorch module or graph module
+        representative_dataset: generator function for obtaining a dataset for
+                                estimating the quantiser parameters.
+        dataset_scale:          This needs to be depricated since it should be
+                                always 1.0.
+                                TODO: we need to implement an option to
+                                choose between float or int8 input/output.
+                                During ONNX export this option should:
+                                * If int8 input is chosen: remove the input DigitalRequantizer module
+                                * If int8 output is chosen: remove the output EpsTunnel module
+        """
         super().__init__()
         self.gmodule = graph_module
+        self.representative_dataset = representative_dataset
+        self.dataset_scale = dataset_scale
         self._integrized = False
 
     def start_observing(
@@ -84,15 +101,21 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
     @classmethod
     def from_trainedfp_model(
-        cls, model: nn.Module, modules_descriptors=None
+        cls, model: nn.Module, modules_descriptors=None,
+        qhparamsinitstrategy: str = 'meanstd'
     ):  # returns fake quantized model from_ floating point quantised model
+        # WARNING:
+        #   modules_descriptors from the .yaml file are only used for the analog core currently
+        #   (to see core type and quantization specs).
+        #   All other layers are constructed according ot the modulewisedescriptionspec.
+        #   TODO: we need to make this more convenient!!!
         modulewisedescriptionspec = (  # change const later
             (
                 {"types": ("Identity")},
                 (
                     "per-array",
                     {"bitwidth": 8, "signed": True},
-                    "meanstd",
+                    qhparamsinitstrategy,
                     "DIANA",
                 ),
             ),
@@ -101,27 +124,25 @@ class DianaModule(nn.Module):  # Base class for all diana models
                 (
                     "per-array",
                     {"bitwidth": 7, "signed": False},
-                    "meanstd",
+                    qhparamsinitstrategy,
                     "DIANA",
                 ),
             ),  # upper clip is updated during training
             (
                 {"types": ("Conv2d")},
                 (
-                    #"per-outchannel_weights",
                     "per-array",
                     {"bitwidth": 8, "signed": True},
-                    "meanstd",
+                    qhparamsinitstrategy,
                     "DIANA",
                 ),
             ),  # can use per-outchannel_weights here
             (
                 {"types": ("Linear")},
                 (
-                    #"per-outchannel_weights",
                     "per-array",
                     {"bitwidth": 8, "signed": True},
-                    "meanstd",
+                    qhparamsinitstrategy,
                     "DIANA",
                 ),
             ),
@@ -135,7 +156,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
         addtreeqdescriptionspec = (
             "per-array",
             {"bitwidth": 8, "signed": True},
-            "meanstd",
+            qhparamsinitstrategy,
             "DIANA",
         )
         graph = qg.fx.quantlib_symbolic_trace(root=model)  # graph module
@@ -151,7 +172,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
         return converted_graph
 
-    def set_quantized(self, activations, dataset_item):
+    def set_quantized(self, activations):
         """
         dataset_item (torch.Tensor):  tensor with batch size >= 1
         """
@@ -160,8 +181,8 @@ class DianaModule(nn.Module):  # Base class for all diana models
         else:
             self.start_observing(not_modules=_QActivation)
 
-        for x in dataset_item:
-            _ = self.gmodule(x.unsqueeze(0))
+        for data in self.representative_dataset():
+            _ = self.gmodule(data)
 
         if activations:
             self.stop_observing()
@@ -177,70 +198,57 @@ class DianaModule(nn.Module):  # Base class for all diana models
                     and not isinstance(module, AnalogOutIdentity)
                 )
             ):
+                # if the number of levels is high enough, we prefer range over step size and use ceil instead of round
+                round_op = torch.round if module.n_levels < 128 else torch.ceil
                 module.scale = torch.Tensor(
-                    torch.exp2(torch.round(torch.log2(module.scale)))
+                    torch.exp2(round_op(torch.log2(module.scale)))
                 )
 
-    def map_to_hw(
-        self,
-        dataset_scale,
-        dataset_item,
-        custom_editors: List[Editor] = [],
-    ):
+    def map_to_hw(self, custom_editors: List[Editor] = []):
         """
-        dataset_scale (torch.tensor): single scale value
-        dataset_item (torch.Tensor):  tensor with batch size = 1
+        custom_editors: optional additional editors
         """
-        # free relus upper bound
+        # freeze each ReLU's upper bound
         for _, mod in self.named_modules():
             if isinstance(mod, DIANAReLU):
                 mod.freeze()
+
         converter = HWMappingConverter(custom_editor=custom_editors)
 
+        dataset_item = next(self.representative_dataset())
         with torch.no_grad():
             self.gmodule = converter(
                 self.gmodule,
                 {
                     "x": {
                         "shape": dataset_item.shape,
-                        "scale": dataset_scale,
+                        "scale": self.dataset_scale,
                     }
                 },
                 input=dataset_item,
             )
 
-    def integrize_layers(
-        self,
-        dataset_scale,
-        dataset_item,
-    ):
+    def integrize_layers(self):
         """
-        dataset_scale (torch.tensor): single scale value
-        dataset_item (torch.Tensor):  tensor with batch size = 1
         """
         converter = LayerIntegrizationConverter()
 
+        dataset_item = next(self.representative_dataset())
         with torch.no_grad():
             self.gmodule = converter(
                 self.gmodule,
                 {
                     "x": {
                         "shape": dataset_item.shape,
-                        "scale": dataset_scale,
+                        "scale": self.dataset_scale,
                     }
                 },
             )
         self._integrized = True
 
-    def export_model(
-        self,
-        export_folder: str,
-        dataset_scale,
-        dataset_item,
-    ):
+    def export_model(self, export_folder: str):
         """
-        dataset_scale (torch.tensor): single scale value
-        dataset_item (torch.Tensor):  tensor with batch size = 1
+        export_folder: folder name to export. File name is derived from the model name.
         """
         # x is an integrised tensor input is needed for validation in dory graph
         if not self._integrized:
@@ -249,7 +257,13 @@ class DianaModule(nn.Module):  # Base class for all diana models
         exporter = DianaExporter()
         from pathlib import Path
 
-        x = (dataset_item / dataset_scale).floor()  # integrize
+        dataset_item = next(self.representative_dataset())
+
+        # ensure the item has batchsize 1
+        if dataset_item.size(0) > 1:
+            dataset_item = dataset_item[0].unsqueeze(0)
+
+        x = (dataset_item / self.dataset_scale).floor()  # integrize
 
         exporter.export(
             network=self.gmodule, input_shape=x.shape, path=export_folder
@@ -273,7 +287,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
         new_state_dict = OrderedDict()
 
         for k, v in old_state_dict.items():
-            name = k[start:]  # remove `module.`
+            name = k[start:]  # remove `gmodule.`
             new_state_dict[name] = v
 
         return new_state_dict

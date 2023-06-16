@@ -98,7 +98,7 @@ class F2FQuantiser(ComposedEditor):
                 )
             )
         editors += [
-            DianaF2FInterposer(),
+            DianaF2FInterposer(modulewisedescriptionspec, analogcoredescriptionspec),
             QuantLibHarmonisedAddRetracer(),
             AddTreeHarmoniser(addtreeqdescriptionspec, addtreeforceoutputeps),
             QuantLibRetracer(),

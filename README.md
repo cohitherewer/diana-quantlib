@@ -1,6 +1,42 @@
-
 # diana-training-fmw
-repository for the training framework of diana
+Quantization-aware training framework for DIANA
+
+# Install
+
+Clone this repo:
+
+```
+git clone https://github.com/dianaKUL/diana-training-fmw.git
+cd diana-training-fmw
+git submodule init
+git submodule update
+```
+
+With python virtual env:
+
+```
+mkvirtualenv quantlib -p /usr/bin/python3.10
+workon quantlib
+pip install -e .
+```
+
+# Run examples
+
+## Post-training quantization
+
+First train the model in full-precision:
+
+```
+cd examples/cifar10
+mkdir checkpoints export
+python train.py
+```
+
+Then apply PTQ:
+
+```
+python quantize_ptq.py
+```
 
 # Workflow
 - ## Pytorch Model 

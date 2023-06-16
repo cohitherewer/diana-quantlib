@@ -31,9 +31,6 @@ roles = Roles([
         ('Conv', NNModuleDescription(class_=DIANAConv2d, kwargs=_QOP_KWARGS | {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1, 'bias': True}, checkers=checker)),
         ('FC', NNModuleDescription(class_=nn.Linear,kwargs={'in_features': 1, 'out_features': 1, 'bias': True})),
     ])),
-    ('interposer', Candidates([
-        ('DianaInterposer', NNModuleDescription(class_=DIANAIdentity, kwargs=_QOP_KWARGS)),
-    ])),
     ('bn', Candidates([
         ('BN2d', NNModuleDescription(class_=nn.BatchNorm2d, kwargs={'num_features': 1})),
     ])),
