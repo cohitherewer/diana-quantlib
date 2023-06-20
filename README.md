@@ -29,13 +29,13 @@ First train the model in full-precision:
 ```
 cd examples/cifar10
 mkdir checkpoints export
-python train.py
+python train.py resnet checkpoints/resnet.pth
 ```
 
 Then apply PTQ:
 
 ```
-python quantize_ptq.py
+python quantize_ptq.py resnet checkpoints/resnet.pth -c config/resnet.yaml
 ```
 
 # Workflow

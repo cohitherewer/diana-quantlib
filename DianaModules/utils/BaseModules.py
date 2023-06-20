@@ -69,7 +69,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
         self._integrized = False
 
     def start_observing(
-        self, is_modules=(_QModule, HarmonisedAdd), not_modules=type(None)
+        self, is_modules=(_QModule), not_modules=type(None)
     ):  # before starting training with FP
         for _, module in self.gmodule.named_modules():
             if isinstance(module, is_modules) and not isinstance(
@@ -78,7 +78,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
                 module.start_observing()
 
     def stop_observing(
-        self, is_modules=(_QModule, HarmonisedAdd), not_modules=type(None)
+        self, is_modules=(_QModule), not_modules=type(None)
     ):  # before starting training with fake quantised network
         for _, module in self.gmodule.named_modules():
             if isinstance(module, is_modules) and not isinstance(
@@ -98,6 +98,39 @@ class DianaModule(nn.Module):  # Base class for all diana models
         for _, module in self.gmodule.named_modules():
             if isinstance(module, DIANAReLU):
                 module.thaw()
+
+    def convert_scales_to_pot(self):
+        """Convert quantization scales to power-of-two scales
+        """
+        # round scales to power-of-two scales
+        for module in self.gmodule.modules():
+            if (isinstance(module, DIANAConv2d) or isinstance(module, DIANALinear)
+                or (isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity))):
+                # if the number of levels is high enough, we prefer range over step size and use ceil instead of round
+                round_op = torch.round if module.n_levels < 128 else torch.ceil
+                module.scale = torch.Tensor(torch.exp2(round_op(torch.log2(module.scale))))
+
+    def align_ews_input_scales(self):
+        """Ensure that the quantization scales of both inputs of an element-wise-add are the same.
+        This is needed since the digital add op cannot scale both inputs individually.
+        """
+        for name, module in self.gmodule.named_modules():
+            # we match by name since harmonized add modules is traced as an nn.Module
+            if 'AddTreeHarmoniser' not in name or '_input_qmodules' not in name:
+                continue
+
+            # TODO: if only one item in scales due to skip without ops, ensure that the scale is the
+            # same as the dominating op (ReLU in ResNet).
+            # -> make a rewriter transform for this
+            scales = []
+            for qm in module.modules():
+                if isinstance(qm, DIANAIdentity):
+                    scales.append(qm.scale)
+
+            new_scale = torch.concat(scales).max().unsqueeze(0)
+            for qm in module.modules():
+                if isinstance(qm, DIANAIdentity):
+                    qm.scale = new_scale
 
     @classmethod
     def from_trainedfp_model(
@@ -189,30 +222,20 @@ class DianaModule(nn.Module):  # Base class for all diana models
         else:
             self.stop_observing(not_modules=_QActivation)
 
-        for _, module in self.gmodule.named_modules():
-            if (
-                type(module) == DIANAConv2d
-                or isinstance(module, DIANALinear)
-                or (
-                    isinstance(module, _QActivation)
-                    and not isinstance(module, AnalogOutIdentity)
-                )
-            ):
-                # if the number of levels is high enough, we prefer range over step size and use ceil instead of round
-                round_op = torch.round if module.n_levels < 128 else torch.ceil
-                module.scale = torch.Tensor(
-                    torch.exp2(round_op(torch.log2(module.scale)))
-                )
+        # Before converting scales to power-of-two, we must also freeze the clipping bounds of ReLU, otherwise
+        # the DIANAReLU scale may be altered during the next forward pass
+        self.freeze_clipping_bound()
+
+        # Convert scales to power-of-two
+        self.convert_scales_to_pot()
+
+        # Set input scales of element-wise-add operations to the same values
+        self.align_ews_input_scales()
 
     def map_to_hw(self, custom_editors: List[Editor] = []):
         """
         custom_editors: optional additional editors
         """
-        # freeze each ReLU's upper bound
-        for _, mod in self.named_modules():
-            if isinstance(mod, DIANAReLU):
-                mod.freeze()
-
         converter = HWMappingConverter(custom_editor=custom_editors)
 
         dataset_item = next(self.representative_dataset())

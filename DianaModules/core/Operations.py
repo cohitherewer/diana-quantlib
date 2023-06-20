@@ -225,12 +225,6 @@ class DIANAReLU(PACTReLU, DianaBaseOperation):
         self.clip_hi.requires_grad = False
         self._clipping_bounds_are_frozen |= True
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = super().forward(x)
-        if self._is_quantised & True == True:
-            self.scale = torch.exp2(torch.round(torch.log2(self.scale)))
-        return out
-
 
 # How I have it right now it will be a convolution in the digital core if it's not followed by a batch norm otherwise it's an analog core
 class DIANAConv2d(QConv2d, DianaBaseOperation):  # digital core

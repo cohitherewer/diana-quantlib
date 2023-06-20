@@ -1,0 +1,108 @@
+!ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 16
+  - 3
+  - 3
+  - 3
+name: net.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 16
+  - 16
+  - 3
+  - 3
+name: net.3.res.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 16
+  - 16
+  - 3
+  - 3
+name: net.3.res.3
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 16
+  - 1
+  - 1
+name: net.4.skip.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 16
+  - 3
+  - 3
+name: net.4.res.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 32
+  - 3
+  - 3
+name: net.4.res.3
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 32
+  - 1
+  - 1
+name: net.5.skip.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 32
+  - 3
+  - 3
+name: net.5.res.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 64
+  - 3
+  - 3
+name: net.5.res.3
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 12
+  - 64
+name: net.8
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD

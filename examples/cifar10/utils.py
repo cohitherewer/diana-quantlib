@@ -1,6 +1,14 @@
 import torch
 from tqdm import tqdm
 from DianaModules.utils.BaseModules import DianaModule
+from DianaModules.models.mlperf_tiny import MobileNet, ResNet
+from DianaModules.models.cifar10.cifarnet import CifarNet8
+
+models = {
+    'resnet': ResNet,
+    'cifarnet8': CifarNet8,
+    'mobilenet': MobileNet
+}
 
 
 def train(model, dataloader, optimizer, criterion, device):

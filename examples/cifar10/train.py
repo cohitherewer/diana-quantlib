@@ -1,22 +1,27 @@
-import os
 import utils
 import torch
+import argparse
 from functools import partial
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.datasets as ds
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 import torchvision
-from DianaModules.models.cifar10.cifarnet import CifarNet8
 
 
 BATCH_SIZE = 32
 EPOCHS = 100
 NUM_WORKERS = 2
 BASE_LR = 0.001
-DEVICE = 'cuda'
-MODEL_FP_WEIGHTS_PATH = './checkpoints/best_fp_model.pth'
 
+
+parser = argparse.ArgumentParser()
+parser.add_argument("model", choices=utils.models.keys(), help="Model architecture")
+parser.add_argument("weights", help="File to store the best model weights (.pth)")
+args = parser.parse_args()
+
+# use cuda if available
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 train_dataset = ds.CIFAR10(
     "./data/cifar10/train",
@@ -66,11 +71,11 @@ optimizer_cls = partial(optim.Adam, lr=BASE_LR)
 lr_scheduler_cls = partial(optim.lr_scheduler.CosineAnnealingLR, T_max=EPOCHS)
 
 # define model and load weights from fp training
-model = CifarNet8()
+model = utils.models[args.model]()
 
 print("Start FP training")
 target_acc = 1.0    # no limit on accuracy
 # define optimizer and learning rate scheduler (according to mlpef specs)
 acc = utils.train_classifier(model, train_dataloader, val_dataloader, optimizer_cls,
-                                    criterion, lr_scheduler_cls, EPOCHS, DEVICE,
-                                    MODEL_FP_WEIGHTS_PATH, target_acc)
+                                    criterion, lr_scheduler_cls, EPOCHS, device,
+                                    args.weights, target_acc)

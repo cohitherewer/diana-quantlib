@@ -1,24 +1,26 @@
-import os
 import utils
 import torch
+import argparse
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision.datasets as ds
 import torchvision
 from DianaModules.utils.BaseModules import DianaModule
 from DianaModules.utils.serialization.Loader import ModulesLoader
-from DianaModules.models.mlperf_tiny import DSCNN, DAE, MobileNet, ResNet
-from DianaModules.models.cifar10.cifarnet import CifarNet8
-from DianaModules.utils.serialization.Serializer import ModulesSerializer
 
 
-DEVICE = 'cuda'
-MODEL_FP_WEIGHTS_PATH = './checkpoints/best_fp_model.pth'
-MODEL_EXPORT_DIR = './export'
-MODEL_CONFIG_PATH = './config/cifarnet8.yaml'
+parser = argparse.ArgumentParser()
+parser.add_argument("model", choices=utils.models.keys(), help="Model architecture")
+parser.add_argument("weights", help="Model weights floating-point model (.pth)")
+parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
+parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
+args = parser.parse_args()
 
 # enable determinism
 torch.manual_seed(0)
+
+# use cuda if available
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # define validation set for testing and select calibration data
 val_dataset = ds.CIFAR10(
@@ -46,7 +48,7 @@ val_dataloader = DataLoader(
 criterion = nn.CrossEntropyLoss()
 
 # define model
-model = CifarNet8()
+model = utils.models[args.model]()
 
 # define a calibration dataset for the quantization parameters
 def representative_dataset():
@@ -54,16 +56,16 @@ def representative_dataset():
         yield data
 
 # load model
-sd = torch.load(MODEL_FP_WEIGHTS_PATH, map_location="cpu")
+sd = torch.load(args.weights, map_location="cpu")
 model.load_state_dict(sd["net"])
 target_acc = sd['acc']  # try to reach the same accuracy as the floating point model
 print("Floating-point accuracy = %.3f"%(100 * target_acc))
 
 #
 module_description = None
-if os.path.exists(MODEL_CONFIG_PATH):
+if args.config is not None:
     loader = ModulesLoader()
-    module_description = loader.load(MODEL_CONFIG_PATH)
+    module_description = loader.load(args.config)
 
 # wrap model in quantlib wrapper
 fq_model = DianaModule(
@@ -84,13 +86,14 @@ fq_model.map_to_hw()
 fq_model.integrize_layers()
 
 # uncomment to show the final quantized graph in pytorch before export
+#print("After Integrize ----------")
 #print(fq_model.gmodule)
 
 # validation of PTQ model accuracy
-fq_model = fq_model.to(DEVICE)
-acc = utils.validation(fq_model, val_dataloader, criterion, DEVICE)
+fq_model = fq_model.to(device)
+acc = utils.validation(fq_model, val_dataloader, criterion, device)
 print("Quantized accuracy = %.3f"%(100 * acc))
 
 # export to ONNX file
 fq_model = fq_model.to('cpu')
-fq_model.export_model(MODEL_EXPORT_DIR)
+fq_model.export_model(args.export_dir)

@@ -27,6 +27,7 @@ roles = Roles([
 
     ('eps_in',  Candidates([
         ('Eps', NNModuleDescription(class_=EpsTunnel, kwargs=_EPS_KWARGS)),
+        ('',     None),  # This line must be last to give priority to matching with Eps first
     ])),
     ('accumulator',  Candidates([
         ('',     None),  #analog accumulator is an optional part of the pattern
