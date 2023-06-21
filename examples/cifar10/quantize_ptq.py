@@ -7,6 +7,7 @@ import torchvision.datasets as ds
 import torchvision
 from DianaModules.utils.BaseModules import DianaModule
 from DianaModules.utils.serialization.Loader import ModulesLoader
+from DianaModules.utils.serialization.Serializer import ModulesSerializer
 
 
 parser = argparse.ArgumentParser()
@@ -27,12 +28,7 @@ val_dataset = ds.CIFAR10(
     "./data/cifar10/validation",
     train=False,
     download=True,
-    transform=torchvision.transforms.Compose(
-        [
-            torchvision.transforms.ToTensor(),              # convert to range  [0, 1]
-            torchvision.transforms.Normalize((0.5), (0.5)), # convert to range [-1, 1]
-        ]
-    ),
+    transform=torchvision.transforms.Compose(utils.get_preprocess(args.model)),
 )
 
 # define the data loaders
@@ -75,6 +71,9 @@ fq_model = DianaModule(
     ),
     representative_dataset,
 )
+
+#serializer = ModulesSerializer(fq_model.gmodule)
+#serializer.dump("my_model.yaml")
 
 # quantize weights and activation
 fq_model.set_quantized(activations=True)

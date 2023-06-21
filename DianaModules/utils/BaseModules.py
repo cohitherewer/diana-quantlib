@@ -20,6 +20,7 @@ from DianaModules.core.Operations import (
 from DianaModules.utils.converters.fake2true import LayerIntegrizationConverter
 from DianaModules.utils.converters.float2fake import F2FConverter
 from DianaModules.utils.converters.hwquantization import HWMappingConverter
+from DianaModules.utils.grapheditors.fake_quantization.LayerQuantization import LayerQuantizer
 from DianaModules.utils.onnx import DianaExporter
 from quantlib.algorithms.qalgorithms.qatalgorithms.pact.qmodules import (
     _PACTActivation,
@@ -68,47 +69,8 @@ class DianaModule(nn.Module):  # Base class for all diana models
         self.dataset_scale = dataset_scale
         self._integrized = False
 
-    def start_observing(
-        self, is_modules=(_QModule), not_modules=type(None)
-    ):  # before starting training with FP
-        for _, module in self.gmodule.named_modules():
-            if isinstance(module, is_modules) and not isinstance(
-                module, not_modules
-            ):
-                module.start_observing()
-
-    def stop_observing(
-        self, is_modules=(_QModule), not_modules=type(None)
-    ):  # before starting training with fake quantised network
-        for _, module in self.gmodule.named_modules():
-            if isinstance(module, is_modules) and not isinstance(
-                module, not_modules
-            ):
-                module.stop_observing()
-
     def forward(self, x: torch.Tensor):
         return self.gmodule(x)
-
-    def freeze_clipping_bound(self):
-        for _, module in self.gmodule.named_modules():
-            if isinstance(module, DIANAReLU):
-                module.freeze()
-
-    def unfreeze_clipping_bound(self) -> None:
-        for _, module in self.gmodule.named_modules():
-            if isinstance(module, DIANAReLU):
-                module.thaw()
-
-    def convert_scales_to_pot(self):
-        """Convert quantization scales to power-of-two scales
-        """
-        # round scales to power-of-two scales
-        for module in self.gmodule.modules():
-            if (isinstance(module, DIANAConv2d) or isinstance(module, DIANALinear)
-                or (isinstance(module, _QActivation) and not isinstance(module, AnalogOutIdentity))):
-                # if the number of levels is high enough, we prefer range over step size and use ceil instead of round
-                round_op = torch.round if module.n_levels < 128 else torch.ceil
-                module.scale = torch.Tensor(torch.exp2(round_op(torch.log2(module.scale))))
 
     def align_ews_input_scales(self):
         """Ensure that the quantization scales of both inputs of an element-wise-add are the same.
@@ -207,37 +169,16 @@ class DianaModule(nn.Module):  # Base class for all diana models
 
     def set_quantized(self, activations):
         """
-        dataset_item (torch.Tensor):  tensor with batch size >= 1
         """
-        if activations:
-            self.start_observing()
-        else:
-            self.start_observing(not_modules=_QActivation)
-
-        for data in self.representative_dataset():
-            _ = self.gmodule(data)
-
-        if activations:
-            self.stop_observing()
-        else:
-            self.stop_observing(not_modules=_QActivation)
-
-        # Before converting scales to power-of-two, we must also freeze the clipping bounds of ReLU, otherwise
-        # the DIANAReLU scale may be altered during the next forward pass
-        self.freeze_clipping_bound()
-
-        # Convert scales to power-of-two
-        self.convert_scales_to_pot()
-
-        # Set input scales of element-wise-add operations to the same values
-        self.align_ews_input_scales()
+        editor = LayerQuantizer(self.representative_dataset, activations)
+        self.gmodule = editor(self.gmodule)
 
     def map_to_hw(self, custom_editors: List[Editor] = []):
         """
         custom_editors: optional additional editors
         """
-        converter = HWMappingConverter(custom_editor=custom_editors)
-
+        converter = HWMappingConverter(custom_editor=custom_editors,
+                                       representative_dataset=self.representative_dataset)
         dataset_item = next(self.representative_dataset())
         with torch.no_grad():
             self.gmodule = converter(
@@ -248,7 +189,6 @@ class DianaModule(nn.Module):  # Base class for all diana models
                         "scale": self.dataset_scale,
                     }
                 },
-                input=dataset_item,
             )
 
     def integrize_layers(self):

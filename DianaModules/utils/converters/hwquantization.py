@@ -4,10 +4,9 @@ from DianaModules.utils.grapheditors.hw_mapping.AnalogNoiseEnabler import (
     AnalogNoiseEnabler,
 )
 from DianaModules.utils.grapheditors.hw_mapping.BNFolding import BNFolder
-from DianaModules.utils.grapheditors.hw_mapping.LinLayerQuant import (
-    LinearLayerQuantizer,
+from DianaModules.utils.grapheditors.fake_quantization.LayerQuantization import (
+    LayerQuantizer,
 )
-
 
 from DianaModules.utils.grapheditors.hw_mapping.Requantizer import (
     DianaRequantizer,
@@ -48,10 +47,11 @@ from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
 
 
 class HWMappingConverter(ComposedEditor):
-    def __init__(self, custom_editor: List[Editor] = [], enable_noise=False):
+    def __init__(self, custom_editor: List[Editor] = [],
+                 representative_dataset=None, enable_noise=False):
         editors = [
             BNFolder(),
-            LinearLayerQuantizer(),
+            LayerQuantizer(representative_dataset, False),
             QuantLibRetracer(),
             F2TAnnotator(),
             EpsTunnelInserter(),
@@ -77,9 +77,7 @@ class HWMappingConverter(ComposedEditor):
     ) -> fx.GraphModule:
 
         g = self._children_editors[0](g)  # `BNFolder`
-        g = self._children_editors[1](
-            g, inputdescription, input=kwargs["input"]
-        )  # `LinearLayerQuantizer`
+        g = self._children_editors[1](g)  # `LayerQuantizer`
         g = self._children_editors[2](g)  # `QuantLibRetracer`
         g = self._children_editors[3](g, inputdescription)  # `F2TAnnotator`
 

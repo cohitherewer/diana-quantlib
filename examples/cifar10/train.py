@@ -23,6 +23,8 @@ args = parser.parse_args()
 # use cuda if available
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+preprocess = utils.get_preprocess(args.model)
+
 train_dataset = ds.CIFAR10(
     "./data/cifar10/train",
     train=True,
@@ -31,21 +33,14 @@ train_dataset = ds.CIFAR10(
         [
             torchvision.transforms.RandomRotation(15),
             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.ToTensor(),              # convert to range  [0, 1]
-            torchvision.transforms.Normalize((0.5), (0.5)), # convert to range [-1, 1]
-        ]
+        ] + preprocess
     ),
 )
 val_dataset = ds.CIFAR10(
     "./data/cifar10/validation",
     train=False,
     download=True,
-    transform=torchvision.transforms.Compose(
-        [
-            torchvision.transforms.ToTensor(),              # convert to range  [0, 1]
-            torchvision.transforms.Normalize((0.5), (0.5)), # convert to range [-1, 1]
-        ]
-    ),
+    transform=torchvision.transforms.Compose(preprocess),
 )
 
 # define the data loaders

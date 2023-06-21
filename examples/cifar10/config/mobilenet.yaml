@@ -1,0 +1,306 @@
+!ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 8
+  - 3
+  - 3
+  - 3
+name: net.0
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 8
+  - 1
+  - 3
+  - 3
+name: net.3
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 16
+  - 8
+  - 1
+  - 1
+name: net.6
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 16
+  - 1
+  - 3
+  - 3
+name: net.9
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 16
+  - 1
+  - 1
+name: net.12
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 1
+  - 3
+  - 3
+name: net.15
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 32
+  - 1
+  - 1
+name: net.18
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 32
+  - 1
+  - 3
+  - 3
+name: net.21
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 32
+  - 1
+  - 1
+name: net.24
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 1
+  - 3
+  - 3
+name: net.27
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 64
+  - 1
+  - 1
+name: net.30
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 64
+  - 1
+  - 3
+  - 3
+name: net.33
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 64
+  - 1
+  - 1
+name: net.36
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 1
+  - 3
+  - 3
+name: net.39
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 128
+  - 1
+  - 1
+name: net.42
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 1
+  - 3
+  - 3
+name: net.45
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 128
+  - 1
+  - 1
+name: net.48
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 1
+  - 3
+  - 3
+name: net.51
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 128
+  - 1
+  - 1
+name: net.54
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 1
+  - 3
+  - 3
+name: net.57
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 128
+  - 1
+  - 1
+name: net.60
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 1
+  - 3
+  - 3
+name: net.63
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 128
+  - 1
+  - 1
+name: net.66
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 128
+  - 1
+  - 3
+  - 3
+name: net.69
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 256
+  - 128
+  - 1
+  - 1
+name: net.72
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 256
+  - 1
+  - 3
+  - 3
+name: net.75
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 256
+  - 256
+  - 1
+  - 1
+name: net.78
+qgranularityspec: PER-ARRAY
+qhinitparam: MEANSTD
+--- !ModuleDescriptor
+core_choice: DIGITAL
+kernel_size: !!python/object/apply:torch.Size
+- !!python/tuple
+  - 10
+  - 256
+name: net.83
+qgranularityspec: PER-ARRAY
+qhinitparam: MINMAX

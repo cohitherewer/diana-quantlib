@@ -1,14 +1,31 @@
 import torch
+import torchvision
+from functools import partial
 from tqdm import tqdm
 from DianaModules.utils.BaseModules import DianaModule
-from DianaModules.models.mlperf_tiny import MobileNet, ResNet
+from DianaModules.models.mlperf_tiny import ResNet, MobileNet
 from DianaModules.models.cifar10.cifarnet import CifarNet8
 
 models = {
     'resnet': ResNet,
     'cifarnet8': CifarNet8,
-    'mobilenet': MobileNet
+    'mobilenet': partial(MobileNet, num_classes=12),
 }
+
+def get_preprocess(model_name):
+    preprocess = []
+
+    if model_name == 'mobilenet':
+        preprocess += [
+            torchvision.transforms.Resize(96)
+        ]
+
+    preprocess += [
+        torchvision.transforms.ToTensor(),              # convert to range  [0, 1]
+        torchvision.transforms.Normalize((0.5), (0.5)), # convert to range [-1, 1]
+    ]
+
+    return preprocess
 
 
 def train(model, dataloader, optimizer, criterion, device):

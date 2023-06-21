@@ -4,10 +4,9 @@ from torch import nn
 
 class MobileNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, num_classes = 4):
         super().__init__()
 
-        num_classes = 4
         modules = [
             nn.Conv2d(3, 8, 3, 2, 1, bias=False),
             nn.BatchNorm2d(8),
