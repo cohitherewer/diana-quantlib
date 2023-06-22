@@ -1,4 +1,0 @@
-- If you use relu's from the torch.nn.functional library always indicate inplace = True 
-- Always create multiple layers when you have one nn layer that's used in multiple layers.
-- Use view instead of flatten 
-

@@ -2,9 +2,9 @@ import torch
 import torchvision
 from functools import partial
 from tqdm import tqdm
-from DianaModules.utils.BaseModules import DianaModule
-from DianaModules.models.mlperf_tiny import ResNet, MobileNet
-from DianaModules.models.cifar10.cifarnet import CifarNet8
+from dianaquantlib.utils.BaseModules import DianaModule
+from dianaquantlib.models.mlperf_tiny import ResNet, MobileNet
+from dianaquantlib.models.cifar10.cifarnet import CifarNet8
 
 models = {
     'resnet': ResNet,

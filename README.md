@@ -12,7 +12,7 @@ git submodule init
 git submodule update
 ```
 
-With python virtual env:
+With python virtual env and virtualenvwrapper:
 
 ```
 mkvirtualenv quantlib -p /usr/bin/python3.10
@@ -92,5 +92,3 @@ When defining your custom quantized classes, make sure to register your own auto
 
 Notes: 
 dont use same relu module multiple times
-view instead of flatten 
-       

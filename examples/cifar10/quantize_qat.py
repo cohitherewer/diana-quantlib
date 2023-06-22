@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.datasets as ds
 import torchvision
-from DianaModules.utils.BaseModules import DianaModule
-from DianaModules.utils.serialization.Loader import ModulesLoader
+from dianaquantlib.utils.BaseModules import DianaModule
+from dianaquantlib.utils.serialization.Loader import ModulesLoader
 
 
 BATCH_SIZE = 32

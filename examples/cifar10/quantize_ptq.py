@@ -5,9 +5,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision.datasets as ds
 import torchvision
-from DianaModules.utils.BaseModules import DianaModule
-from DianaModules.utils.serialization.Loader import ModulesLoader
-from DianaModules.utils.serialization.Serializer import ModulesSerializer
+from dianaquantlib.utils.BaseModules import DianaModule
+from dianaquantlib.utils.serialization.Loader import ModulesLoader
+from dianaquantlib.utils.serialization.Serializer import ModulesSerializer
 
 
 parser = argparse.ArgumentParser()
