@@ -24,7 +24,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
     def __init__(
         self,
         graph_module: Union[nn.Module, fx.graph_module.GraphModule],
-        representative_dataset: Generator,
+        representative_dataset: Generator = None,
         dataset_scale: torch.tensor = torch.tensor(1.0)
 
     ):

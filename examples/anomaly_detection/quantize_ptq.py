@@ -11,7 +11,7 @@ from dianaquantlib.utils.serialization.Serializer import ModulesSerializer
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("model", choices=utils.models.keys(), help="Model architecture")
+parser.add_argument("model", choices=utils.anomaly_models.keys(), help="Model architecture")
 parser.add_argument("weights", help="Model weights floating-point model (.pth)")
 parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
 parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
@@ -24,8 +24,8 @@ torch.manual_seed(0)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # define validation set for testing and select calibration data
-val_dataset = ds.CIFAR10(
-    "./data/cifar10/validation",
+val_dataset = utils.AnomalyMNIST(
+    "./data/mnist/validation",
     train=False,
     download=True,
     transform=torchvision.transforms.Compose(utils.get_preprocess(args.model)),
@@ -41,10 +41,10 @@ val_dataloader = DataLoader(
 )
 
 # define criterion
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
 
 # define model
-model = utils.models[args.model]()
+model = utils.anomaly_models[args.model]()
 
 # define a calibration dataset for the quantization parameters
 def representative_dataset():
@@ -57,7 +57,6 @@ model.load_state_dict(sd["net"])
 target_acc = sd['acc']  # try to reach the same accuracy as the floating point model
 print("Floating-point accuracy = %.3f"%(100 * target_acc))
 
-#
 module_description = None
 if args.config is not None:
     loader = ModulesLoader()
@@ -67,13 +66,10 @@ if args.config is not None:
 fq_model = DianaModule(
     DianaModule.from_trainedfp_model(
         model, modules_descriptors=module_description,
-        qhparamsinitstrategy='minmax'
+        qhparamsinitstrategy='meanstd'
     ),
     representative_dataset,
 )
-
-#serializer = ModulesSerializer(fq_model.gmodule)
-#serializer.dump("my_model.yaml")
 
 # quantize weights and activation
 fq_model.set_quantized(activations=True)
@@ -90,7 +86,7 @@ fq_model.integrize_layers()
 
 # validation of PTQ model accuracy
 fq_model = fq_model.to(device)
-acc = utils.validation(fq_model, val_dataloader, criterion, device)
+acc = utils.validation_anomaly(fq_model, val_dataloader, criterion, device)
 print("Quantized accuracy = %.3f"%(100 * acc))
 
 # export to ONNX file

@@ -20,7 +20,7 @@ BASE_LR = 0.0005
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("model", choices=utils.models.keys(), help="Model architecture")
+parser.add_argument("model", choices=utils.classifier_models.keys(), help="Model architecture")
 parser.add_argument("weights", help="Model weights floating-point model (.pth), fake quantized model (.pth.fq) or hardware mapped model (.pth.hw)")
 parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
 parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
@@ -75,7 +75,7 @@ optimizer_cls = partial(optim.Adam, lr=BASE_LR)
 lr_scheduler_cls = partial(optim.lr_scheduler.CosineAnnealingLR, T_max=EPOCHS)
 
 # define model and load weights from fp training
-model = utils.models[args.model]()
+model = utils.classifier_models[args.model]()
 
 # define a calibration dataset for the quantization parameters
 def representative_dataset():
@@ -147,7 +147,7 @@ fq_model.integrize_layers()
 
 # validation of PTQ model accuracy
 fq_model = fq_model.to(device)
-acc = utils.validation(fq_model, val_dataloader, criterion, device)
+acc = utils.validation_classifier(fq_model, val_dataloader, criterion, device)
 print("Integrized accuracy = %.3f"%(100 * acc))
 
 # export to ONNX file

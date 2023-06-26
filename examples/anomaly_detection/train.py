@@ -1,4 +1,6 @@
 import utils
+import numpy as np
+import random
 import torch
 import argparse
 from functools import partial
@@ -10,13 +12,13 @@ import torchvision
 
 
 BATCH_SIZE = 32
-EPOCHS = 100
-NUM_WORKERS = 2
+EPOCHS = 20
+NUM_WORKERS = 4
 BASE_LR = 0.001
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("model", choices=utils.models.keys(), help="Model architecture")
+parser.add_argument("model", choices=utils.anomaly_models.keys(), help="Model architecture")
 parser.add_argument("weights", help="File to store the best model weights (.pth)")
 args = parser.parse_args()
 
@@ -25,19 +27,18 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 preprocess = utils.get_preprocess(args.model)
 
-train_dataset = ds.CIFAR10(
-    "./data/cifar10/train",
+train_dataset = ds.MNIST(
+    "./data/mnist/train",
     train=True,
     download=True,
     transform=torchvision.transforms.Compose(
         [
-            torchvision.transforms.RandomRotation(15),
             torchvision.transforms.RandomHorizontalFlip(),
         ] + preprocess
     ),
 )
-val_dataset = ds.CIFAR10(
-    "./data/cifar10/validation",
+val_dataset = utils.AnomalyMNIST(
+    "./data/mnist/validation",
     train=False,
     download=True,
     transform=torchvision.transforms.Compose(preprocess),
@@ -59,18 +60,18 @@ val_dataloader = DataLoader(
 )
 
 # define criterion
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
 
 # define criterion
 optimizer_cls = partial(optim.Adam, lr=BASE_LR)
 lr_scheduler_cls = partial(optim.lr_scheduler.CosineAnnealingLR, T_max=EPOCHS)
 
-# define model and load weights from fp training
-model = utils.models[args.model]()
+# define model
+model = utils.anomaly_models[args.model]()
 
 print("Start FP training")
 target_acc = 1.0    # no limit on accuracy
 # define optimizer and learning rate scheduler (according to mlpef specs)
-acc = utils.train_classifier(model, train_dataloader, val_dataloader, optimizer_cls,
-                                    criterion, lr_scheduler_cls, EPOCHS, device,
-                                    args.weights, target_acc)
+acc = utils.train_anomaly(model, train_dataloader, val_dataloader, optimizer_cls,
+                          criterion, lr_scheduler_cls, EPOCHS, device,
+                          args.weights, target_acc)

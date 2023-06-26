@@ -4,10 +4,9 @@ from torch import nn
 
 class DAE(nn.Module):
 
-    def __init__(self):
+    def __init__(self, num_outputs=640):
         super().__init__()
 
-        num_outputs = 640
         num_units = 128
 
         unit_spec = [
