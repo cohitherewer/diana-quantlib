@@ -1,58 +1,27 @@
 import torch
-import random
-import numpy as np
 import torchvision
-from PIL import Image
 from functools import partial
 from tqdm import tqdm
 from sklearn import metrics
-import torchvision.datasets as ds
 from dianaquantlib.utils.BaseModules import DianaModule
-from dianaquantlib.models.mlperf_tiny import ResNet, MobileNet, DAE
+from dianaquantlib.models.mlperf_tiny import ResNet, MobileNet, DAE, DSCNN
 from dianaquantlib.models.cifar10.cifarnet import CifarNet8
 
-classifier_models = {
+image_classifier_models = {
     'resnet': ResNet,
     'cifarnet8': CifarNet8,
     'mobilenet': partial(MobileNet, num_classes=12),
+}
+
+audio_classifier_models = {
+    'dscnn': DSCNN,
 }
 
 anomaly_models = {
     'dae': partial(DAE, num_outputs=28*28),
 }
 
-all_models = classifier_models | anomaly_models
-
-
-class AnomalyMNIST(ds.MNIST):
-    """Synthetically corrupts the MNIST images to introduce anomalies
-    """
-
-    def seed(self, index):
-        random.seed(index)
-        np.random.seed(index)
-
-    def __getitem__(self, index: int):
-        img = self.data[index].numpy()
-
-        # Randomly introduce 'anomalies' by corrupting the input
-        # we do this in a deterministic way so that the requested index number
-        # it will always return the exact same permuted or clean image and label.
-        self.seed(index)
-
-        target = 0.0
-        if random.random() < 0.5:
-            sigma = random.random() * 50 + 50
-            img = img.astype('float32') + np.random.normal(0, sigma, img.shape)
-            img = np.clip(img, 0, 255).astype('uint8')
-            target = 1.0
-
-        img = Image.fromarray(img, mode="L")
-
-        if self.transform is not None:
-            img = self.transform(img)
-
-        return img, target
+all_models = image_classifier_models | audio_classifier_models | anomaly_models
 
 
 def get_preprocess(model_name):

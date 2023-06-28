@@ -1,6 +1,5 @@
 import argparse
 from functools import partial
-import utils
 import os
 import copy
 from torch.utils.data import DataLoader, Dataset
@@ -12,15 +11,17 @@ import torchvision
 from dianaquantlib.utils.BaseModules import DianaModule
 from dianaquantlib.utils.serialization.Loader import ModulesLoader
 
+import utils
+import dataset
 
-BATCH_SIZE = 32
+BATCH_SIZE = 100
 EPOCHS = 20
-NUM_WORKERS = 2
-BASE_LR = 0.0005
+NUM_WORKERS = 4
+BASE_LR = 0.0003
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("model", choices=utils.image_classifier_models.keys(), help="Model architecture")
+parser.add_argument("model", choices=utils.audio_classifier_models.keys(), help="Model architecture")
 parser.add_argument("weights", help="Model weights floating-point model (.pth), fake quantized model (.pth.fq) or hardware mapped model (.pth.hw)")
 parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
 parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
@@ -32,24 +33,16 @@ torch.manual_seed(0)
 # use cuda if available
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-preprocess = utils.get_preprocess(args.model)
-
-train_dataset = ds.CIFAR10(
-    "./data/cifar10/train",
-    train=True,
+train_dataset = dataset.KeywordSpottingDataset(
+    "./data",
     download=True,
-    transform=torchvision.transforms.Compose(
-        [
-            torchvision.transforms.RandomRotation(15),
-            torchvision.transforms.RandomHorizontalFlip(),
-        ] + preprocess
-    ),
+    subset="training"
 )
-val_dataset = ds.CIFAR10(
-    "./data/cifar10/validation",
-    train=False,
+
+val_dataset = dataset.KeywordSpottingDataset(
+    "./data",
     download=True,
-    transform=torchvision.transforms.Compose(preprocess),
+    subset="validation"
 )
 
 # define the data loaders
@@ -75,11 +68,11 @@ optimizer_cls = partial(optim.Adam, lr=BASE_LR)
 lr_scheduler_cls = partial(optim.lr_scheduler.CosineAnnealingLR, T_max=EPOCHS)
 
 # define model and load weights from fp training
-model = utils.image_classifier_models[args.model]()
+model = utils.audio_classifier_models[args.model]()
 
 # define a calibration dataset for the quantization parameters
 def representative_dataset():
-    for _, (data, _) in zip(range(5), val_dataloader):
+    for _, (data, _) in zip(range(2), val_dataloader):
         yield data
 
 weights_file = args.weights
@@ -100,6 +93,7 @@ if args.config is not None:
 fq_model = DianaModule(
     DianaModule.from_trainedfp_model(
         model, modules_descriptors=module_description,
+        qhparamsinitstrategy='meanstd'
     ),
     representative_dataset,
 )

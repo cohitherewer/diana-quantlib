@@ -7,11 +7,10 @@ import torchvision.datasets as ds
 import torchvision
 from dianaquantlib.utils.BaseModules import DianaModule
 from dianaquantlib.utils.serialization.Loader import ModulesLoader
-from dianaquantlib.utils.serialization.Serializer import ModulesSerializer
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("model", choices=utils.classifier_models.keys(), help="Model architecture")
+parser.add_argument("model", choices=utils.image_classifier_models.keys(), help="Model architecture")
 parser.add_argument("weights", help="Model weights floating-point model (.pth)")
 parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
 parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
@@ -44,7 +43,7 @@ val_dataloader = DataLoader(
 criterion = nn.CrossEntropyLoss()
 
 # define model
-model = utils.classifier_models[args.model]()
+model = utils.image_classifier_models[args.model]()
 
 # define a calibration dataset for the quantization parameters
 def representative_dataset():

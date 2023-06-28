@@ -1,6 +1,5 @@
 import argparse
 from functools import partial
-import utils
 import os
 import copy
 from torch.utils.data import DataLoader, Dataset
@@ -12,6 +11,8 @@ import torchvision
 from dianaquantlib.utils.BaseModules import DianaModule
 from dianaquantlib.utils.serialization.Loader import ModulesLoader
 
+import utils
+import dataset
 
 BATCH_SIZE = 32
 EPOCHS = 10
@@ -44,7 +45,7 @@ train_dataset = ds.MNIST(
         ] + preprocess
     ),
 )
-val_dataset = utils.AnomalyMNIST(
+val_dataset = dataset.AnomalyMNIST(
     "./data/mnist/validation",
     train=False,
     download=True,
