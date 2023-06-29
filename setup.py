@@ -14,14 +14,11 @@ setuptools.setup(
     description="A package to quantize QNNs for the DIANA chip.",
     packages=find_packages(),
     install_requires=[
-        'networkx==2.8.4',
+        'numpy',
+        'pyyaml',
         'torch==1.12',
-        'torchvision',
+        'networkx==2.8.4',
         'onnx==1.12.0',
         'onnxruntime==1.15.0',
-        'numpy',
-        'tqdm',
-        'pyyaml',
-        'scikit-learn', # only for running examples
     ]
 )

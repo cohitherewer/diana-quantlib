@@ -1,0 +1,4 @@
+tqdm
+scikit-learn
+torchaudio==0.12.0
+torchvision==0.13.0

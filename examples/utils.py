@@ -6,11 +6,13 @@ from sklearn import metrics
 from dianaquantlib.utils.BaseModules import DianaModule
 from dianaquantlib.models.mlperf_tiny import ResNet, MobileNet, DAE, DSCNN
 from dianaquantlib.models.cifar10.cifarnet import CifarNet8
+from dianaquantlib.models.cifar10.resnet import resnet20
 
 image_classifier_models = {
-    'resnet': ResNet,
+    'resnet8': ResNet,
+    'resnet20': resnet20,
     'cifarnet8': CifarNet8,
-    'mobilenet': partial(MobileNet, num_classes=12),
+    'mobilenetv1': partial(MobileNet, num_classes=12),
 }
 
 audio_classifier_models = {
@@ -27,7 +29,7 @@ all_models = image_classifier_models | audio_classifier_models | anomaly_models
 def get_preprocess(model_name):
     preprocess = []
 
-    if model_name == 'mobilenet':
+    if model_name == 'mobilenetv1':
         preprocess += [
             torchvision.transforms.Resize(96)
         ]
