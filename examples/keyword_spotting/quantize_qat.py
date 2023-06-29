@@ -58,6 +58,7 @@ val_dataloader = DataLoader(
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
     pin_memory=True,
+    shuffle=True,
 )
 
 # define criterion

@@ -65,7 +65,7 @@ if args.config is not None:
 fq_model = DianaModule(
     DianaModule.from_trainedfp_model(
         model, modules_descriptors=module_description,
-        qhparamsinitstrategy='minmax'
+        qhparamsinitstrategy='meanstd'
     ),
     representative_dataset,
 )

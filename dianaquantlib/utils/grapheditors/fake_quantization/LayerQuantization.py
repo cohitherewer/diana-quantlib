@@ -2,8 +2,36 @@ import torch
 import torch.fx as fx
 from torch import nn
 from quantlib.algorithms.qmodules.qmodules.qmodules import _QModule, _QActivation
+from quantlib.editing.editing.editors import Rewriter, Applier
+from quantlib.editing.editing.editors.optrees import OpTree
 from quantlib.editing.editing.editors.base.editor import Editor
+from quantlib.editing.graphs.fx import quantlib_symbolic_trace
+from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.finder import AddTreeFinder
 from dianaquantlib.core.Operations import AnalogOutIdentity, DIANAReLU, DIANAIdentity
+
+
+class AddTreeAlignInputScalesApplier(Applier):
+
+    def _apply(self, g: fx.GraphModule, ap: OpTree, id_: str) -> fx.GraphModule:
+        """Ensure both input scales of add are equal
+        """
+        in_modules = [g.get_submodule(n.target) for n in ap.inbound_frontier]
+        scales = [mod.scale for mod in in_modules]
+        aligned_scale = torch.concat(scales).max().unsqueeze(0)
+        for mod in in_modules:
+            mod.scale = aligned_scale
+
+        return g
+
+
+class AddTreeAlignInputScales(Rewriter):
+
+    def __init__(self):
+
+        finder = AddTreeFinder()
+        applier = AddTreeAlignInputScalesApplier()
+
+        super().__init__('AddTreeAlignInputScales', quantlib_symbolic_trace, finder, applier)
 
 
 class LayerQuantizer(Editor):
@@ -18,6 +46,7 @@ class LayerQuantizer(Editor):
         super().__init__()
         self.representative_dataset = representative_dataset
         self.activations = activations
+        self.align_add_input_scales = AddTreeAlignInputScales()
 
     def start_observing(self, g):
         """Enable statistical observers
@@ -65,31 +94,6 @@ class LayerQuantizer(Editor):
             round_op = torch.round if module.n_levels < 128 else torch.ceil
             module.scale = torch.Tensor(torch.exp2(round_op(torch.log2(module.scale))))
 
-    def align_ews_input_scales(self, g):
-        """Ensure that the quantization scales of both inputs of an element-wise-add are the same.
-        This is needed since the digital add op cannot scale both inputs individually.
-        """
-        if not self.activations:
-            return
-
-        for name, module in g.named_modules():
-            # we match by name since harmonized add modules is traced as an nn.Module
-            if 'AddTreeHarmoniser' not in name or '_input_qmodules' not in name:
-                continue
-
-            # TODO: if only one item in scales due to skip without ops, ensure that the scale is the
-            # same as the dominating op (ReLU in ResNet).
-            # -> make a rewriter transform for this
-            scales = []
-            for qm in module.modules():
-                if isinstance(qm, DIANAIdentity):
-                    scales.append(qm.scale)
-
-            new_scale = torch.concat(scales).max().unsqueeze(0)
-            for qm in module.modules():
-                if isinstance(qm, DIANAIdentity):
-                    qm.scale = new_scale
-
     def apply(self, g: fx.graph_module.GraphModule, *args, **kwargs) -> fx.graph_module.GraphModule:
         """Quantize all layers
         """
@@ -107,6 +111,7 @@ class LayerQuantizer(Editor):
         self.freeze_clipping_bound(g)
         self.convert_scales_to_pot(g)   # Convert scales to power-of-two
 
-        self.align_ews_input_scales(g)
+        if self.activations:
+            g = self.align_add_input_scales(g)
 
         return g

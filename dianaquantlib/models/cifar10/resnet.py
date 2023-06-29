@@ -118,6 +118,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
         self.linear = nn.Linear(64, num_classes)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.flatten = nn.Flatten()
 
         self.apply(_weights_init)
 
@@ -136,7 +137,7 @@ class ResNet(nn.Module):
         out = self.layer2(out)
         out = self.layer3(out)
         out = self.avgpool(out)
-        out = out.view(out.size(0), -1)
+        out = self.flatten(out)
         out = self.linear(out)
 
         return out

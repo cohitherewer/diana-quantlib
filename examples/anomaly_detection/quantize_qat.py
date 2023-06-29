@@ -65,6 +65,7 @@ val_dataloader = DataLoader(
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
     pin_memory=True,
+    shuffle=True,
 )
 
 # define criterion
@@ -79,7 +80,7 @@ model = utils.anomaly_models[args.model]()
 
 # define a calibration dataset for the quantization parameters
 def representative_dataset():
-    for _, (data, _) in zip(range(5), val_dataloader):
+    for _, (data, _) in zip(range(5), train_dataloader):
         yield data
 
 weights_file = args.weights

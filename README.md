@@ -22,21 +22,7 @@ pip install -e .
 
 # Run examples
 
-## Post-training quantization
-
-First train the model in full-precision:
-
-```
-cd examples/cifar10
-mkdir checkpoints export
-python train.py resnet checkpoints/resnet.pth
-```
-
-Then apply PTQ:
-
-```
-python quantize_ptq.py resnet checkpoints/resnet.pth -c config/resnet.yaml
-```
+See the [examples](examples/README.md)
 
 # Workflow
 - ## Pytorch Model 

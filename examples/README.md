@@ -45,8 +45,8 @@ python quantize_ptq.py resnet8 checkpoints/resnet8.pth -c config/resnet8.yaml
 
 Then use `export/ResNet_QL_NOANNOTATION.onnx` as compilation input for TVM.
 
-For estimating the power-of-two quantization parameters, the example uses the 'minmax'
-estimator. However, it might be usefull to try 'meanstd' too and use whatever produces the
+For estimating the power-of-two quantization parameters, the example uses the `meanstd`
+estimator. However, it might be usefull to try `minmax` too and use whatever produces the
 best accuracy.
 
 ## QAT (8-bit)
@@ -58,9 +58,9 @@ python quantize_qat.py mobilenetv1 checkpoints/mobilenetv1.pth -c config/mobilen
 This script will perform the following steps:
 
 * Fake quantize model (FQ)
-* Fine-tune ==> saves a `checkpoints/mobilenetv1.pth.fq` file with the highest accuracy
+* Fine-tune &rarr; saves a `checkpoints/mobilenetv1.pth.fq` file with the highest accuracy
 * Map to hardware (HW)
-* Fine-tune ==> saves a `checkpoints/mobilenetv1.pth.hw` file with the highest accuracy
+* Fine-tune &rarr; saves a `checkpoints/mobilenetv1.pth.hw` file with the highest accuracy
 * Integerise and export to ONNX
 
 If for example the accuracy of the FQ stage is satisfactory, but the accuracy of the HW stage is not,
