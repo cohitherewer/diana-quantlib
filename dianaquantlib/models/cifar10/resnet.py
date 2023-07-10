@@ -147,8 +147,8 @@ def resnet8():
     return ResNet(BasicBlock, [1, 1, 1])
 
 
-def resnet20():
-    return ResNet(BasicBlock, [3, 3, 3])
+def resnet20(num_classes=10):
+    return ResNet(BasicBlock, [3, 3, 3], num_classes)
 
 
 def resnet32():

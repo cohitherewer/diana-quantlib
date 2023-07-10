@@ -3,7 +3,6 @@ from torch import Tensor
 from torch import nn
 import torch.nn.functional as F
 import torch
-import torchvision
 
 
 def conv3x3(

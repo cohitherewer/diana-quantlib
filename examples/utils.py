@@ -10,7 +10,7 @@ from dianaquantlib.models.cifar10.resnet import resnet20
 
 image_classifier_models = {
     'resnet8': ResNet,
-    'resnet20': resnet20,
+    'resnet20': partial(resnet20, num_classes=12),
     'cifarnet8': CifarNet8,
     'mobilenetv1': partial(MobileNet, num_classes=12),
 }
