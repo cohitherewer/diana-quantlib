@@ -1,5 +1,3 @@
-
-from imp import new_module
 from pydoc import describe
 from typing import List, Tuple
 from dianaquantlib.core.Operations import AnalogAccumulator, AnalogConv2d, AnalogGaussianNoise, DIANAConv2d

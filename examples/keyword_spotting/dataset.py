@@ -2,8 +2,6 @@ import os
 import numpy as np
 import torch
 import torchaudio
-import matplotlib.pyplot as plt
-import librosa
 import random
 
 
@@ -131,26 +129,29 @@ class KeywordSpottingDataset(torchaudio.datasets.SPEECHCOMMANDS):
         return len(self.data)
 
 
-#def plot_spectrogram(specgram, title=None, ylabel="freq_bin", ax=None):
-#    if ax is None:
-#        _, ax = plt.subplots(1, 1)
-#    if title is not None:
-#        ax.set_title(title)
-#    ax.set_ylabel(ylabel)
-#    ax.imshow(librosa.power_to_db(specgram), origin="lower", aspect="auto", interpolation="nearest")
-#    plt.show()
-#
-#
-#train_dataset = KeywordSpottingDataset(
-#    "./data/",
-#    download=True,
-#    subset="training"
-#)
-#
-#val_dataset = KeywordSpottingDataset(
-#    "./data/",
-#    download=True,
-#    subset="validation"
-#)
+if __name__ == '__main__':
+    import librosa
+    import matplotlib.pyplot as plt
 
-#plot_spectrogram(train_dataset[0][0][0], 'mfcc')
+    def plot_spectrogram(specgram, title=None, ylabel="freq_bin", ax=None):
+        if ax is None:
+            _, ax = plt.subplots(1, 1)
+        if title is not None:
+            ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.imshow(librosa.power_to_db(specgram), origin="lower", aspect="auto", interpolation="nearest")
+        plt.show()
+
+    train_dataset = KeywordSpottingDataset(
+        "./data/",
+        download=True,
+        subset="training"
+    )
+
+    val_dataset = KeywordSpottingDataset(
+        "./data/",
+        download=True,
+        subset="validation"
+    )
+
+    plot_spectrogram(train_dataset[0][0][0], 'mfcc')
