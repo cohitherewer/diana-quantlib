@@ -2,7 +2,9 @@ import os
 import io
 import torch
 import pytest
+import numpy as np
 from functools import partial
+from collections.abc import Iterable
 import onnx
 import onnxruntime as rt
 from dianaquantlib.utils.BaseModules import DianaModule
@@ -53,12 +55,16 @@ def run_onnx_model(model_filename, inputs):
         model_filename,
         providers=["CPUExecutionProvider"],
     )
-    outputs = []
-    for inp in inputs:
-        for inp_b1 in inp:
-            i = inp_b1.unsqueeze(0).numpy()
-            out = session.run([output_name], {input_name: i})
-            outputs.append(torch.Tensor(out[0]))
+    if isinstance(inputs, np.ndarray):
+        out = session.run([output_name], {input_name: inputs})
+        outputs = torch.Tensor(out[0])
+    else:
+        outputs = []
+        for inp in inputs:
+            for inp_b1 in inp:
+                i = inp_b1.unsqueeze(0).numpy()
+                out = session.run([output_name], {input_name: i})
+                outputs.append(torch.Tensor(out[0]))
 
     return outputs
 
@@ -69,11 +75,31 @@ def assert_equal_outputs(expected, actual):
         assert torch.eq(exp, act).all()
 
 
-@pytest.mark.parametrize("model", ['dae', 'dscnn', 'resnet20', 'resnet8', 'mobilenetv1'])
-def test_digital_ptq(model):
+def parse_feature_file(filename):
+    """Return a torch.Tensor, parsed from a CSV text file
+    """
+    with open(filename) as f:
+        lines = f.read().splitlines()
+
+    # parse shape
+    shape_str = lines[0][lines[0].index('[') + 1:lines[0].index(']')]
+    shape = tuple([int(v) for v in shape_str.split(',')])
+
+    # parse values
+    values = []
+    for value in lines[1].split(','):
+        if value != '':
+            values.append(float(value))
+
+    return torch.Tensor(values).reshape(*shape)
+
+
+# DSCNN last check fails, likely due to different behaviour of first conv between onnxruntime and pytorch
+@pytest.mark.parametrize("modelname", ['dae', 'dscnn', 'resnet20', 'resnet8', 'mobilenetv1'])
+def test_digital_ptq(modelname):
 
     # Setup
-    data = models[model]
+    data = models[modelname]
     model = data[0]()
     weights_file = data[1]
     config_file = data[2]
@@ -120,3 +146,15 @@ def test_digital_ptq(model):
 
     expected_outputs = torch.load(expected_outputs_file, map_location="cpu")['y']
     assert_equal_outputs(expected_outputs, outputs)
+
+    # Also check that exported 'output.txt' contains correct values
+
+    # DSCNN fails due to slightly different behaviour between pytorch and onnx runtime
+    # of the first conv with non standard kernel size, paddings and strides. Therefore, we skip this check for this model
+    if modelname == 'dscnn':
+        return
+
+    inp = np.load(os.path.join(export_folder, 'input.npy'))
+    output = run_onnx_model(export_onnxfile, inp)     # run model with onnx runtime
+    feature_file_output = torch.Tensor(np.load(os.path.join(export_folder, "output.npy")))
+    assert_equal_outputs(output, feature_file_output)

@@ -202,7 +202,7 @@ class DianaModule(nn.Module):  # Base class for all diana models
         if dataset_item.size(0) > 1:
             dataset_item = dataset_item[0].unsqueeze(0)
 
-        x = (dataset_item / self.dataset_scale).floor()  # integrize
+        x = (dataset_item / self.dataset_scale)
 
         exporter.export(
             network=self.gmodule, input_shape=x.shape, path=export_folder

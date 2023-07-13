@@ -1,12 +1,12 @@
-from pathlib import Path
-from typing import Optional
+from functools import partial
+from typing import List, NamedTuple, Optional, Tuple
 from quantlib.backends.base.onnxannotator import ONNXAnnotator
-from quantlib.backends.base.onnxexporter import ONNXExporter
-from quantlib.backends.dory.onnxexporter import DORYExporter
+import quantlib.editing.graphs as qg
 
 import onnxruntime as rt
 
 import torch
+import numpy as np
 from torch import nn
 import os
 import onnx
@@ -90,23 +90,29 @@ class DianaAnnotator(ONNXAnnotator):
             n.attribute.extend(annotations)
 
 
-class DianaExporter(DORYExporter):
+class DianaExporter:
+    """ONNX exporter class
+    """
+
     def __init__(self):
-        annotator = DianaAnnotator("DORY")
-        ONNXExporter.__init__(self, annotator=annotator)
+        self.annotator = DianaAnnotator("DORY")
+        # TODO: for now we assume a single input and single output
+        self.input_names = ['input']
+        self.output_names = ['output']
 
     def export(
         self,
         network: nn.Module,
-        input_shape: torch.Size,
+        input_shape: Tuple,
         path: os.PathLike,
         name: Optional[str] = None,
         opset_version: int = 10,
     ) -> None:
+
         onnxname = name if name is not None else network._get_name()
         onnxfilename = (
             onnxname + "_QL_NOANNOTATION.onnx"
-        )  # TODO: should the name hint at whether the network is FP, FQ, or TQ? How can we derive this information (user-provided vs. inferred from the network)?
+        )
         onnxfilepath = os.path.join(path, onnxfilename)
 
         # export the network (https://pytorch.org/docs/master/onnx.html#torch.onnx.export)
@@ -114,6 +120,8 @@ class DianaExporter(DORYExporter):
             network,
             torch.randn(input_shape),  # a dummy input to trace the `nn.Module`
             onnxfilepath,
+            input_names=self.input_names,
+            output_names=self.output_names,
             export_params=True,
             do_constant_folding=True,
             opset_version=opset_version,
@@ -135,4 +143,39 @@ class DianaExporter(DORYExporter):
             providers=["CPUExecutionProvider"],
         )
         ## read optimized graph and annotate it with backend-specific information
-        self._annotator.annotate(network, onnxfilepath)
+        self.annotator.annotate(network, onnxfilepath)
+
+    def dump_features(self,
+                      network: nn.Module,
+                      x:       torch.Tensor,
+                      path:    os.PathLike) -> None:
+        """Given a network, export the features associated with a given input.
+        """
+
+        class Features(NamedTuple):
+            module_name: str
+            features:    torch.Tensor
+
+        # Since PyTorch uses dynamic graphs, we don't have symbolic handles
+        # over the inner array. Therefore, we use PyTorch hooks to dump the
+        # outputs of Requant layers.
+        features: List[Features] = []
+
+        def hook_fn(self, in_: torch.Tensor, out_: torch.Tensor, module_name: str):
+            features.append(Features(module_name=module_name, features=out_))
+
+        # 1. set up hooks to intercept features
+        for n, m in network.named_modules():
+            if isinstance(m, qg.nn.Requantisation):
+                hook = partial(hook_fn, module_name=n)
+                m.register_forward_hook(hook)
+
+        # 2. propagate the supplied input through the network; the hooks will capture the features
+        x = x.clone()
+        y = network(x)
+
+        # 3. export input, features, and output to .npy files
+        np.save(os.path.join(path, f"{self.input_names[0]}.npy"), x.numpy())
+        for i, (module_name, f) in enumerate(features):
+            np.save(os.path.join(path, f"{module_name}_out{i}.npy"), f.detach().numpy())
+        np.save(os.path.join(path, f"{self.output_names[0]}.npy"), y.detach().numpy())
