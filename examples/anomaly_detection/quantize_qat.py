@@ -1,7 +1,6 @@
+import os
 import argparse
 from functools import partial
-import os
-import copy
 from torch.utils.data import DataLoader, Dataset
 import torch
 import torch.nn as nn
@@ -26,6 +25,9 @@ parser.add_argument("weights", help="Model weights floating-point model (.pth), 
 parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
 parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
 args = parser.parse_args()
+
+if not os.path.exists(args.export_dir):
+    os.makedirs(args.export_dir)
 
 # enable determinism
 torch.manual_seed(0)

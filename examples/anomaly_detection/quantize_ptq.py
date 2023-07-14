@@ -1,3 +1,4 @@
+import os
 import torch
 import argparse
 import torch.nn as nn
@@ -6,7 +7,6 @@ import torchvision.datasets as ds
 import torchvision
 from dianaquantlib.utils.BaseModules import DianaModule
 from dianaquantlib.utils.serialization.Loader import ModulesLoader
-from dianaquantlib.utils.serialization.Serializer import ModulesSerializer
 
 import utils
 import dataset
@@ -18,6 +18,9 @@ parser.add_argument("weights", help="Model weights floating-point model (.pth)")
 parser.add_argument("-c", "--config", help="Model config file (.yaml)", default=None)
 parser.add_argument("-e", "--export-dir", help="Directory to export onnx and feature files", default='export')
 args = parser.parse_args()
+
+if not os.path.exists(args.export_dir):
+    os.makedirs(args.export_dir)
 
 # enable determinism
 torch.manual_seed(0)
