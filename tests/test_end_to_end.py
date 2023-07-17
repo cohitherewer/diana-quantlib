@@ -70,9 +70,12 @@ def run_onnx_model(model_filename, inputs):
 
 
 def assert_equal_outputs(expected, actual):
-    assert len(expected) == len(actual)
-    for exp, act in zip(expected, actual):
-        assert torch.eq(exp, act).all()
+    if isinstance(expected, list):
+        assert len(expected) == len(actual)
+        for exp, act in zip(expected, actual):
+            assert torch.eq(exp, act).all()
+    else:
+        assert torch.eq(expected, actual).all()
 
 
 def parse_feature_file(filename):

@@ -177,5 +177,5 @@ class DianaExporter:
         # 3. export input, features, and output to .npy files
         np.save(os.path.join(path, f"{self.input_names[0]}.npy"), x.numpy())
         for i, (module_name, f) in enumerate(features):
-            np.save(os.path.join(path, f"{module_name}_out{i}.npy"), f.detach().numpy())
+            np.save(os.path.join(path, f"intermediate_{i}.npy"), f.detach().numpy())
         np.save(os.path.join(path, f"{self.output_names[0]}.npy"), y.detach().numpy())
