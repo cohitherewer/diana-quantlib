@@ -7,7 +7,74 @@ from quantlib.editing.editing.editors.optrees import OpTree
 from quantlib.editing.editing.editors.base.editor import Editor
 from quantlib.editing.graphs.fx import quantlib_symbolic_trace
 from quantlib.editing.editing.float2fake.quantisation.addtreeharmoniser.finder import AddTreeFinder
+from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
+from quantlib.editing.editing.editors.nnmodules import NNModuleDescription, Candidates, Roles, generate_named_patterns
+from quantlib.editing.editing.editors.nnmodules.rewriter.factory import get_rewriter_class
+from quantlib.editing.editing.editors.nnmodules.finder.nnsequential import PathGraphMatcher
+from quantlib.editing.editing.editors.nnmodules.applier import NNModuleApplier
+from quantlib.editing.editing.editors.nnmodules.applicationpoint import NodesMap
 from dianaquantlib.core.Operations import AnalogOutIdentity, DIANAReLU, DIANAIdentity
+
+
+activation_candidates = Candidates([
+        ('QIdentity',  NNModuleDescription(class_=nn.Identity,  kwargs={})),
+        ('QReLU',      NNModuleDescription(class_=nn.ReLU,      kwargs={})),
+        ('QReLU6',     NNModuleDescription(class_=nn.ReLU6,     kwargs={})),
+        ('QLeakyReLU', NNModuleDescription(class_=nn.LeakyReLU, kwargs={})),
+    ])
+
+
+dropout_candidates = Candidates([
+        ('', None),
+        ('Dropout', NNModuleDescription(class_=nn.Dropout, kwargs={})),
+        ('Dropout2d', NNModuleDescription(class_=nn.Dropout2d, kwargs={})),
+    ])
+
+
+avgpool_roles = Roles([
+    ('activation_in', activation_candidates),
+    ('dropout_in', dropout_candidates),
+    ('avgpool', Candidates([
+        ('AdaptiveAvgPool2d', NNModuleDescription(class_=nn.AdaptiveAvgPool2d, kwargs={'output_size': (1, 1)})),
+    ])),
+    ('flatten', Candidates([
+        ('', None),
+        ('Flatten', NNModuleDescription(class_=nn.Flatten, kwargs={})),
+    ])),
+    ('dropout_out', dropout_candidates),
+    ('activation_out', activation_candidates),
+])
+
+
+class AvgPoolAlignOutputScaleApplier(NNModuleApplier):
+
+    def _apply(self, g: fx.GraphModule, ap: NodesMap, id_: str) -> fx.GraphModule:
+        """Ensure the quantization scale of activation_out equals that of activation_in
+        """
+        name_to_match_module = self.pattern.name_to_match_module(nodes_map=ap, data_gm=g)
+        module_activation_in = name_to_match_module['activation_in']
+        module_activation_out = name_to_match_module['activation_out']
+
+        module_activation_out.scale = module_activation_in.scale
+
+        return g
+
+
+class AvgPoolAlignOutputScale(ComposedEditor):
+
+    def __init__(self):
+        # generate rewriters
+        admissible_screenplays = list(avgpool_roles.all_screenplays)
+
+        # programmatically generate all the patterns, then for each pattern generate the corresponding `Rewriter`
+        editors = []
+        for name, pattern in generate_named_patterns(avgpool_roles, admissible_screenplays):
+            class_name = name + 'AvgPoolAlignOutputScale'
+
+            class_ = get_rewriter_class(class_name, pattern, PathGraphMatcher, AvgPoolAlignOutputScaleApplier)
+            editors.append(class_())
+
+        super().__init__(editors)
 
 
 class AddTreeAlignInputScalesApplier(Applier):
@@ -62,6 +129,7 @@ class LayerQuantizer(Editor):
         self.representative_dataset = representative_dataset
         self.activations = activations
         self.align_add_input_scales = AddTreeAlignInputScales()
+        self.align_avg_pool_output_scale = AvgPoolAlignOutputScale()
 
     def start_observing(self, g):
         """Enable statistical observers
@@ -128,5 +196,6 @@ class LayerQuantizer(Editor):
 
         if self.activations:
             g = self.align_add_input_scales(g)
+            g = self.align_avg_pool_output_scale(g)
 
         return g

@@ -14,6 +14,9 @@ from dianaquantlib.utils.grapheditors.layer_integrization.AnalogOutRequant impor
 from dianaquantlib.utils.grapheditors.layer_integrization.LinearOpQuant import (
     DianaLinearOpIntegrizer,
 )
+from dianaquantlib.utils.grapheditors.layer_integrization.MiscOpQuant import (
+    DianaMiscOpIntegrizer,
+)
 
 
 from quantlib.editing.editing.editors.base.composededitor import ComposedEditor
@@ -37,7 +40,8 @@ class LayerIntegrizationConverter(ComposedEditor):
             [
                 AnalogNoiseDisabler(),  # removed by onnx-runtime in exported onnx
                 AnalogConvIntegrizer(),
-                DianaLinearOpIntegrizer(),  # problem is hereee
+                DianaLinearOpIntegrizer(),
+                DianaMiscOpIntegrizer(),
                 AnalogOutRequantizer(),
                 EpsTunnelConstructSimplifier(),
                 EpsTunnelRemover(),
