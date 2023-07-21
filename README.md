@@ -1,4 +1,7 @@
 # diana-training-fmw
+
+![CI](https://github.com/KULeuven-MICAS/diana-quantlib/actions/workflows/ci.yml/badge.svg)
+
 Quantization-aware training framework for DIANA
 
 # Install
