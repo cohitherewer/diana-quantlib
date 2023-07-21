@@ -1,6 +1,6 @@
 # Install package and run tests
 
-name: Python application
+name: CI
 
 on:
   push:
